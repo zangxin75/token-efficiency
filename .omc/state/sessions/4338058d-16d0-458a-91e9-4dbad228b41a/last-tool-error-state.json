@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"cd /mnt/data/token-efficiency/tokeneff-cli\\ntokeneff stats 2>&1\\necho \\\"--- DB 直接确认 ---\\\"\\nsqlite3 ~/.tokeneff/meter.db \\\"SELECT COUNT(*) FROM usage_records;\\\"\",\"description\":\"Verify meter...",
-  "error": "Exit code 127\n\n⚡ tokeneff 电表  (CNY)\n\n  今日花费       ¥0.0000  \n  本月累计       ¥0.0000  \n  近 7 天日均    ¥0.0000  \n  累计节省       ¥0.0000  \n\n暂无今日用量数据\n\n--- DB 直接确认 ---\n/bin/bash: 行 7: sqlite3: 未找到命令",
-  "timestamp": "2026-08-12T14:27:36.273Z",
-  "retry_count": 1
-}

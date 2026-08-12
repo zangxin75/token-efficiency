@@ -56,3 +56,6 @@ coverage.xml
 
 # OS
 Thumbs.db
+
+# OMC runtime state
+.omc/
