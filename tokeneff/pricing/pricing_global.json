@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_meta": {
+    "version": "2.0.0",
+    "updated": "2026-08-11",
+    "description": "海外分站按量定价表（Phase 2：按 token 精算）。所有价格 USD per 1M tokens。official_* 为上游官方原价，用于透明计费展示（response 中返回 you_saved_pct）。pricing_tier_discount 定义订阅层级对 PAYGO 基础价的折扣系数。",
+    "currency": "USD",
+    "unit": "per_1m_tokens",
+    "cost_source_note": "official_* 来自 DeepSeek/MiniMax/z.ai/OpenAI/Anthropic 官方定价页（2026-08）。our_* 基于 docs/strategy/套餐转按量定价_深度分析_20260811.md §五推导，加价幅度 30~80%（远低于 OpenRouter 475%）。MiniMax/GLM/Kimi 因上游包月批发，边际成本极低，可低于官方原价。",
+    "model_name_mapping": "model 字段对应 overseas/litellm_config.yaml 的 model_name；国内 proxy/litellm_config.yaml 保持一致命名。"
+  },
+  "pricing_tier_discount": {
+    "_doc": "订阅用户的折扣系数（× PAYGO 基础价）。PAYGO=1.0（无折扣），订阅层级越高级折扣越大。",
+    "paygo": 1.0,
+    "free": 1.0,
+    "starter": 0.9,
+    "pro": 0.7,
+    "team": 0.5,
+    "enterprise": null
+  },
+  "subscription_plans": {
+    "_doc": "海外订阅套餐（包含 token 额度 + 超额后按 PAYGO 折扣价计费）。",
+    "free": {
+      "price_usd_monthly": 0,
+      "included_tokens": 1000000,
+      "overage_tier": "paygo"
+    },
+    "starter": {
+      "price_usd_monthly": 9,
+      "included_tokens": 50000000,
+      "overage_tier": "starter"
+    },
+    "pro": {
+      "price_usd_monthly": 49,
+      "included_tokens": 500000000,
+      "overage_tier": "pro"
+    },
+    "team": {
+      "price_usd_monthly": 199,
+      "included_tokens": 3000000000,
+      "overage_tier": "team"
+    },
+    "enterprise": {
+      "price_usd_monthly": 999,
+      "included_tokens": 20000000000,
+      "overage_tier": "enterprise",
+      "contact_sales": true
+    }
+  },
+  "models": {
+    "deepseek-v4-pro": {
+      "provider": "deepseek",
+      "label": "DeepSeek V4 Pro",
+      "badge": "flagship",
+      "our_input": 0.435,
+      "our_output": 0.87,
+      "official_input": 0.435,
+      "official_output": 0.87,
+      "context_window": 128000,
+      "capabilities": [
+        "reasoning",
+        "code",
+        "long-context"
+      ],
+      "note": "与官方同价（0加价）。盈利靠 prompt cache：cache miss $0.435 → cache hit $0.003625，缓存命中率30%即有 ~13% 毛利。比 DeepInfra($1.30) 便宜 66%，比 OpenRouter($2.50) 便宜 83%"
+    },
+    "deepseek-v4-flash": {
+      "provider": "deepseek",
+      "label": "DeepSeek V4 Flash",
+      "badge": "fast",
+      "our_input": 0.09,
+      "our_output": 0.18,
+      "official_input": 0.09,
+      "official_output": 0.18,
+      "context_window": 128000,
+      "capabilities": [
+        "fast",
+        "code"
+      ],
+      "note": "与官方同价（0加价）。比 DeepInfra($0.55) 便宜 84%"
+    },
+    "minimax-m3": {
+      "provider": "minimax",
+      "label": "MiniMax M3",
+      "badge": "multimodal",
+      "our_input": 0.1,
+      "our_output": 0.4,
+      "official_input": 0.15,
+      "official_output": 0.6,
+      "context_window": 512000,
+      "capabilities": [
+        "multimodal",
+        "long-context",
+        "reasoning"
+      ],
+      "note": "包月批发：比官方标准价($0.30/$1.20)便宜 67%，比促销价($0.15/$0.60)便宜 33%"
+    },
+    "minimax-m2.5": {
+      "provider": "minimax",
+      "label": "MiniMax M2.5",
+      "badge": "balanced",
+      "our_input": 0.15,
+      "our_output": 0.6,
+      "official_input": 0.3,
+      "official_output": 1.2,
+      "context_window": 1000000,
+      "capabilities": [
+        "long-context"
+      ],
+      "note": "1M 超长上下文；比官方便宜 50%"
+    },
+    "glm-5.2": {
+      "provider": "glm",
+      "label": "GLM-5.2 (Zhipu)",
+      "badge": "flagship",
+      "our_input": 0.8,
+      "our_output": 2.5,
+      "official_input": 1.4,
+      "official_output": 4.4,
+      "context_window": 128000,
+      "capabilities": [
+        "reasoning",
+        "code",
+        "multimodal",
+        "agent"
+      ],
+      "note": "智谱旗舰；比官方便宜 43%，比 OpenRouter 便宜 58%"
+    },
+    "glm-5.1": {
+      "provider": "glm",
+      "label": "GLM-5.1 (Zhipu)",
+      "badge": "balanced",
+      "our_input": 0.6,
+      "our_output": 2.0,
+      "official_input": 1.05,
+      "official_output": 3.5,
+      "context_window": 128000,
+      "capabilities": [
+        "reasoning",
+        "code"
+      ]
+    },
+    "k3": {
+      "provider": "kimi",
+      "label": "Kimi K3 (Moonshot)",
+      "badge": "code",
+      "our_input": 0.5,
+      "our_output": 1.0,
+      "official_input": 4.17,
+      "official_output": 8.33,
+      "context_window": 1000000,
+      "capabilities": [
+        "code",
+        "long-context",
+        "multimodal"
+      ],
+      "note": "编程旗舰；包月优势碾压，比官方便宜 88%。1M 上下文"
+    },
+    "kimi-k2.7-code": {
+      "provider": "kimi",
+      "label": "Kimi K2.7 Code",
+      "badge": "code",
+      "our_input": 0.5,
+      "our_output": 1.0,
+      "official_input": 4.17,
+      "official_output": 8.33,
+      "context_window": 256000,
+      "capabilities": [
+        "code"
+      ]
+    }
+  },
+  "international_models": {
+    "_doc": "国际模型（BYOK 或转售，价格随官方调整。用于让海外用户在一个 API 里同时访问中国+国际模型）。",
+    "gpt-4o": {
+      "provider": "openai",
+      "our_input": 2.5,
+      "our_output": 10.0,
+      "official_input": 2.5,
+      "official_output": 10.0,
+      "context_window": 128000
+    },
+    "claude-sonnet-4-6": {
+      "provider": "anthropic",
+      "our_input": 3.0,
+      "our_output": 15.0,
+      "official_input": 3.0,
+      "official_output": 15.0,
+      "context_window": 200000
+    }
+  },
+  "byok": {
+    "_doc": "BYOK（Bring Your Own Key）模式：用户自带上游 API key，0 加价。仅收基础设施月费。",
+    "enabled": true,
+    "infrastructure_fee_usd_monthly": 0.5,
+    "supported_providers": [
+      "deepseek",
+      "glm",
+      "minimax",
+      "kimi",
+      "openai",
+      "anthropic"
+    ],
+    "markup": 0.0
+  },
+  "micro_payment": {
+    "_doc": "x402 加密微支付配置：支持 $1 起充，降低海外获客门槛。",
+    "enabled": true,
+    "min_recharge_usd": 1.0,
+    "protocols": [
+      "x402"
+    ],
+    "chain": "base",
+    "currency": "USDC",
+    "expire_seconds": 600
+  }
+}

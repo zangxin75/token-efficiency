@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="24" viewBox="0 0 160 24">
+  <rect width="160" height="24" rx="4" fill="#0f1629" stroke="#10b981" stroke-width="1"/>
+  <circle cx="14" cy="12" r="4" fill="#10b981"/>
+  <text x="26" y="16" fill="#e8edf5" font-family="Verdana, sans-serif" font-size="10" font-weight="600">Powered by Token Efficiency</text>
+</svg>

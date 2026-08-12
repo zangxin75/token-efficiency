@@ -1,0 +1,113 @@
+"""电表统计展示：用 rich 表格输出花费/模型分布/省钱归因。
+
+MVP 用命令行表格（非 Live TUI，TUI 留待 v0.1 增强）。
+关联设计文档 §6.2、§15。
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+from rich.console import Console
+from rich.table import Table
+
+from .. import config as cfg_module
+from ..meter.predictor import BudgetAlert, SpendPredictor
+from ..meter.store import UsageStore
+
+console = Console()
+
+
+def _char_bar(pct: float, width: int = 24) -> str:
+    """字符画进度条（rich.bar.Bar 不存在，§6.3 M5 修订）。"""
+    pct = max(0.0, min(pct, 100.0))
+    filled = int(width * pct / 100)
+    bar = "█" * filled + "░" * (width - filled)
+    color = "green" if pct < 60 else ("yellow" if pct < 80 else "red")
+    return f"[{color}]{bar}[/{color}] {pct:.0f}%"
+
+
+async def _gather_stats(store: UsageStore, currency: str) -> dict:
+    today = await store.get_today_total(currency=currency)
+    month = await store.get_month_total(currency=currency)
+    models = await store.get_model_breakdown_today()
+    rate = await store.get_recent_rate()
+    saved = await store.get_total_saved()
+    history = await store.get_history_30d()
+    forecast = SpendPredictor().predict_monthly(history, currency)
+    return {
+        "today": today, "month": month, "models": models,
+        "rate": rate, "saved": saved, "forecast": forecast,
+    }
+
+
+def show_stats(model_filter: str | None = None) -> None:
+    """展示电表统计。"""
+    cfg = cfg_module.get_config()
+    currency = cfg.get_currency()
+    sym = "¥" if currency == "CNY" else "$"
+
+    async def _run():
+        store = UsageStore()
+        await store.init()
+        try:
+            stats = await _gather_stats(store, currency)
+        finally:
+            await store.flush()
+            await store.close()
+        return stats
+
+    stats = asyncio.run(_run())
+
+    # 标题
+    console.print()
+    console.print(f"[bold cyan]⚡ tokeneff 电表[/bold cyan]  [dim]({currency})[/dim]")
+    console.print()
+
+    # 概览
+    overview = Table(show_header=False, box=None, padding=(0, 2))
+    overview.add_row("今日花费", f"{sym}{stats['today']:.4f}")
+    overview.add_row("本月累计", f"{sym}{stats['month']:.4f}")
+    overview.add_row("近 7 天日均", f"{sym}{stats['rate']:.4f}")
+
+    # ★ v0.2: 月终预测
+    fc = stats["forecast"]
+    if fc.confidence > 0.1:
+        overview.add_row(
+            "月终预测",
+            f"~{sym}{fc.estimated:.2f} [dim]({fc.confidence:.0%} 置信)[/dim]",
+        )
+
+    overview.add_row("累计节省", f"[green]{sym}{stats['saved']:.4f}[/green]")
+    console.print(overview)
+    console.print()
+
+    # ★ v0.2: 预算告警（月预算 > 0 时显示进度条 + 阈值告警）
+    budget = cfg_module.get_config().get_budget()
+    if budget > 0:
+        pct = stats["month"] / budget * 100
+        console.print(
+            f"预算进度  {sym}{stats['month']:.2f} / {sym}{budget:.2f}  " + _char_bar(pct)
+        )
+        if pct >= 80:
+            console.print(
+                f"[bold red]⚠ 已用 {pct:.0f}%，超过 80% 告警阈值，请注意控制用量[/bold red]"
+            )
+        console.print()
+
+    # 模型分布
+    models = stats["models"]
+    if model_filter:
+        models = [m for m in models if model_filter.lower() in m["model"].lower()]
+
+    if models:
+        table = Table(title="今日模型花费分布", title_style="bold")
+        table.add_column("模型", style="cyan")
+        table.add_column("花费", justify="right")
+        table.add_column("tokens", justify="right")
+        for m in models:
+            table.add_row(m["model"], f"{sym}{m['cost']:.4f}", f"{m['tokens']:,}")
+        console.print(table)
+    else:
+        console.print("[dim]暂无今日用量数据[/dim]")
+    console.print()
