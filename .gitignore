@@ -59,3 +59,9 @@ Thumbs.db
 
 # OMC runtime state
 .omc/
+
+# PyInstaller 中间产物（保留 build/hooks、build/*.sh、build/sidecar_entry.py）
+pyinstaller_build/
+build/bdist.*/
+build/lib/
+*.spec
