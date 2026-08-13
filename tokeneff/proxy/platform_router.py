@@ -14,13 +14,16 @@ from .. import config as cfg_module
 from .byok_router import adapt_request_body, get_provider_format
 
 
-def route(model: str, body: bytes, request_headers: dict) -> tuple[str, dict]:
+def route(model: str, body: bytes, request_headers: dict, path: str = "") -> tuple[str, dict]:
     """平台模式路由：转发到 TokenEff gateway。
 
     Args:
         model: 模型名
         body: 请求体（bytes）
         request_headers: 客户端原始请求头（忽略，用平台 key）
+        path: 客户端请求路径（如 "v1/messages"、"v1/chat/completions"）
+              ★ Anthropic 格式客户端（Claude Code）打 /v1/messages，需透传到
+              网关同名端点；网关自己处理 OpenAI↔Anthropic 格式转换。
 
     Returns:
         (url, headers) 网关地址 + 平台 key 头
@@ -37,7 +40,15 @@ def route(model: str, body: bytes, request_headers: dict) -> tuple[str, dict]:
         )
 
     base = cfg.get_platform_url().rstrip("/")
-    url = f"{base}/v1/chat/completions"
+
+    # ★ 透传客户端路径：网关 /v1/messages + /v1/chat/completions 都支持，
+    # 按客户端原始格式转发，避免 Anthropic body 打到 OpenAI 端点。
+    # 仅放行已知 LLM 端点，其余默认走 chat/completions（向后兼容）。
+    suffix = path.lstrip("/")
+    if suffix in ("v1/messages", "v1/chat/completions", "v1/responses"):
+        url = f"{base}/{suffix}"
+    else:
+        url = f"{base}/v1/chat/completions"
 
     headers = {
         "Content-Type": "application/json",

@@ -75,13 +75,14 @@ async def intercept(request: Request, path: str):
     # 2. 路由：按 mode 分支选择 BYOK（用户 key 直连上游）或平台（TokenEff 网关）
     req_headers = dict(request.headers)
     if mode == "platform":
-        upstream_url, headers = platform_router.route(model, body, req_headers)
-        provider_format = platform_router.get_format(model)
+        # ★ 透传 path：Claude Code 打 /v1/messages，需转发到网关同名端点
+        upstream_url, headers = platform_router.route(model, body, req_headers, path)
+        provider_format = "openai"  # ★ platform 模式不做本地 adapt，网关自处理格式转换
     else:
         upstream_url, headers = byok_router.route(model, body, req_headers)
         provider_format = byok_router.get_provider_format(model)
 
-    # 3. Anthropic 格式转换（★ N3-C2）
+    # 3. Anthropic 格式转换（★ N3-C2，仅 BYOK 模式；platform 模式网关侧转换）
     if provider_format == "anthropic":
         body = byok_router.adapt_request_body(body, provider_format)
 
@@ -126,7 +127,7 @@ async def intercept(request: Request, path: str):
         usage = UsageResult.from_dict(payload)
         if usage.has_data:
             await collector.record(model, usage, elapsed=elapsed)
-            log.info(f"[metered] {model}: {usage.total_tokens} tokens, elapsed={elapsed:.2f}s")
+            log.info(f"[metered] {model}: in={usage.input_tokens} out={usage.completion_tokens}, elapsed={elapsed:.2f}s")
 
         return Response(
             content=content,
@@ -159,7 +160,7 @@ async def _stream_and_meter(upstream_resp, model: str, mode: str, start_time: fl
                 usage = UsageResult.from_dict(data)
                 if usage.has_data:
                     await collector.record(model, usage, elapsed=elapsed)
-                    log.info(f"[metered stream] {model}: {usage.total_tokens} tokens")
+                    log.info(f"[metered stream] {model}: in={usage.input_tokens} out={usage.completion_tokens}")
                     break
     except Exception as e:
         log.warning(f"stream usage parse error: {e}")
