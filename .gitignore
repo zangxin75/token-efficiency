@@ -76,6 +76,8 @@ sidecar-src.log
 sidecar-exe.log
 sidecar*.log
 sidecar*.err
+proxy-src.log
+proxy*.log
 tauri*.log
 diag-*.png
 diag-*.txt

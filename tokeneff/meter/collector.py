@@ -60,6 +60,10 @@ class Collector:
             latency_ms=int(elapsed * 1000) if elapsed else 0,
         )
         await self.store.record(rec)
+        # 即时落盘：电表是低频场景（每条都是真实花费），且 proxy(7860) 与
+        # sidecar(7861) 是独立进程，共享同一 SQLite 文件——只有写库后对方才读得到。
+        # store.record 默认攒 50 条才 flush，跨进程时缓冲数据会丢失，故此处立即 flush。
+        await self.store.flush()
 
     @staticmethod
     def _get_currency() -> str:

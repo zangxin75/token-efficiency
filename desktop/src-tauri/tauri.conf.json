@@ -43,6 +43,22 @@
         "y": 100,
         "shadow": false,
         "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "tokeneff 设置",
+        "width": 640,
+        "height": 560,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "resizable": true,
+        "center": true,
+        "shadow": true,
+        "visible": false,
+        "minWidth": 520,
+        "minHeight": 480
       }
     ],
     "security": {

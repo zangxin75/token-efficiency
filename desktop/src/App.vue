@@ -7,6 +7,7 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import {
   fetchSummary,
+  fetchConfig,
   currencySymbol,
   fmt,
   type MeterSummary,
@@ -24,6 +25,8 @@ let timer: number | undefined;
 let downX = 0;
 let downY = 0;
 let dragStarted = false;
+// 首次启动 onboarding 检测守卫，避免重复弹窗
+let onboardingChecked = false;
 
 const symbol = computed(() => currencySymbol(currency.value));
 
@@ -52,7 +55,27 @@ async function refresh() {
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
+  checkOnboarding();
 });
+
+/** 首次启动检测：无已配置 provider → 弹 settings 窗口进入 onboarding */
+async function checkOnboarding() {
+  if (onboardingChecked) return;
+  onboardingChecked = true;
+  try {
+    const cfg = await fetchConfig();
+    if ((cfg.providers_configured?.length ?? 0) === 0) {
+      const settings = await WebviewWindow.getByLabel("settings");
+      if (settings) {
+        await settings.show();
+        await settings.setFocus();
+      }
+    }
+  } catch {
+    // sidecar 未就绪时不弹窗，避免打断；用户连上后重启会再检测
+    onboardingChecked = false;
+  }
+}
 onUnmounted(() => {
   if (timer) window.clearInterval(timer);
 });

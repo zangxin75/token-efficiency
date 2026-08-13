@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   fetchSummary,
   fetchModels,
@@ -45,6 +46,15 @@ async function hidePanel() {
   await getCurrentWindow().hide();
 }
 
+/** 打开设置/onboarding 窗口 */
+async function openSettings() {
+  const settings = await WebviewWindow.getByLabel("settings");
+  if (settings) {
+    await settings.show();
+    await settings.setFocus();
+  }
+}
+
 /** 置信度 0~1 → 百分比文字 */
 function confidenceText(c: number | undefined): string {
   if (c === undefined || !Number.isFinite(c)) return "—";
@@ -60,8 +70,8 @@ const maxCharged = computed(() => {
 
 <template>
   <div class="panel">
-    <div class="header">
-      <span class="title">⚡ tokeneff 电表</span>
+    <div class="header" data-tauri-drag-region>
+      <span class="title" data-tauri-drag-region>⚡ tokeneff 电表</span>
       <button class="close" title="收起" @click="hidePanel">×</button>
     </div>
 
@@ -114,7 +124,10 @@ const maxCharged = computed(() => {
         </div>
       </div>
 
-      <div class="footer">更新于 {{ lastUpdate }}</div>
+      <div class="footer">
+        <span>更新于 {{ lastUpdate }}</span>
+        <button class="settings-btn" title="设置" @click="openSettings">⚙</button>
+      </div>
     </template>
   </div>
 </template>
@@ -257,8 +270,22 @@ const maxCharged = computed(() => {
 .footer {
   font-size: 9px;
   color: #9ca3af;
-  text-align: center;
   margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.settings-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.settings-btn:hover {
+  color: #818cf8;
 }
 .connecting {
   flex: 1;

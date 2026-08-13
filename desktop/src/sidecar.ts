@@ -62,6 +62,89 @@ export async function fetchHealth(): Promise<HealthInfo> {
   return data;
 }
 
+// ── B3: provider / key / config 端点 ─────────────────────────────────────────
+
+/** /api/providers 单条结构（对齐 local_server.py list_providers） */
+export interface ProviderInfo {
+  name: string;
+  label: string;
+  models: string[];
+  auth_header: string;
+  configured: boolean;
+}
+
+/** /api/config 返回结构 */
+export interface AppConfig {
+  mode: string;
+  region: string;
+  currency: string;
+  proxy_port: number;
+  budget_monthly_usd: number;
+  alert_threshold: number;
+  providers_configured: string[];
+  has_platform_key: boolean;
+}
+
+export interface VerifyResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface SaveKeyResult {
+  ok: boolean;
+  provider?: string;
+  error?: string;
+}
+
+/** GET /api/providers — 可用 provider 列表（含是否已配置） */
+export async function fetchProviders(): Promise<ProviderInfo[]> {
+  const { data } = await sidecar.get<{ providers: ProviderInfo[] }>(
+    "/api/providers"
+  );
+  return data.providers ?? [];
+}
+
+/** POST /api/config/verify — 验证 key 是否有效（不存储） */
+export async function verifyKey(
+  provider: string,
+  key: string
+): Promise<VerifyResult> {
+  const { data } = await sidecar.post<VerifyResult>("/api/config/verify", {
+    provider,
+    key,
+  });
+  return data;
+}
+
+/** POST /api/config/key — 存储 provider key 到 keyring */
+export async function saveKey(
+  provider: string,
+  key: string
+): Promise<SaveKeyResult> {
+  const { data } = await sidecar.post<SaveKeyResult>("/api/config/key", {
+    provider,
+    key,
+  });
+  return data;
+}
+
+/** GET /api/config — 读取当前配置 */
+export async function fetchConfig(): Promise<AppConfig> {
+  const { data } = await sidecar.get<AppConfig>("/api/config");
+  return data;
+}
+
+/** POST /api/config — 更新非敏感配置字段 */
+export async function updateConfig(
+  patch: Partial<AppConfig>
+): Promise<{ updated: Record<string, unknown> }> {
+  const { data } = await sidecar.post<{ updated: Record<string, unknown> }>(
+    "/api/config",
+    patch
+  );
+  return data;
+}
+
 /** 货币符号 */
 export function currencySymbol(currency: string): string {
   return currency === "CNY" ? "¥" : "$";
@@ -69,5 +152,8 @@ export function currencySymbol(currency: string): string {
 
 /** 紧凑数字格式化：0.0284 → "0.0284"，0 → "0.0000" */
 export function fmt(n: number, digits = 4): string {
-  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+  if (!Number.isFinite(n)) return "—";
+  // 小额消费（< 1 分）显示更高精度，否则 $0.000027 会被舍入成 $0.0000 看不出计费
+  if (n > 0 && n < 0.01) return n.toFixed(6);
+  return n.toFixed(digits);
 }
