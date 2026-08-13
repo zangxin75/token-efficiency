@@ -66,9 +66,12 @@ app = FastAPI(title="tokeneff Sidecar API", version="0.1.0", lifespan=lifespan)
 # ★ B2 回流修复（Windows 联调踩坑）：Tauri dev server 的 origin 带动态端口
 # （如 http://127.0.0.1:1420），固定白名单 allow_origins 无法覆盖，改用正则。
 # 教训："日志显示 200"不等于"前端拿到数据"——无 CORS 头的响应会被 webview 丢弃。
+# ★ B5 回流修复（安装版踩坑）：Tauri 2 production 模式 origin 随 webview 而异——
+#   Windows WebView2 = https://tauri.localhost；macOS/Linux WebKit = tauri://localhost。
+#   原 ^tauri:// 只匹配 WebKit，漏了 WebView2，导致安装版 fetchSummary 被 CORS 拦截、球恒灰。
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^tauri://",
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^https?://tauri\.localhost$|^tauri://",
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
