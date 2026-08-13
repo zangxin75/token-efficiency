@@ -15,6 +15,16 @@
     "core:window:allow-outer-position",
     "core:webview:default",
     "core:event:default",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/tokeneff-sidecar",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
   ]
 }

@@ -68,6 +68,7 @@ build/lib/
 # Tauri / Node（desktop 子项目）
 desktop/node_modules/
 desktop/src-tauri/target/
+desktop/src-tauri/binaries/
 desktop/dist/
 desktop/*.log
 
