@@ -12,6 +12,7 @@ import {
   fmt,
   type MeterSummary,
 } from "./sidecar";
+import { detectForm } from "./platform";
 
 const today = ref(0);
 const rate = ref(0);
@@ -52,10 +53,39 @@ async function refresh() {
   }
 }
 
+// B4：平台交互形态（ball/tray）。Windows 恒为 ball；tray 形态（Linux Wayland）下
+// 理论上应隐藏悬浮球靠托盘，但本机主场景是 ball，此处仅记录供未来 Linux 分支用。
+const form = ref<"ball" | "tray">("ball");
+// B4：sidecar 崩溃守护事件监听（Rust watchdog emit "sidecar-status"）
+let statusUnlisten: (() => void) | undefined;
+
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
   checkOnboarding();
+  // 平台检测
+  detectForm().then((f) => {
+    form.value = f;
+    // tray 形态（Linux Wayland）隐藏悬浮球，交给系统托盘
+    if (f === "tray") {
+      getCurrentWindow().hide().catch(() => {});
+    }
+  });
+  // 监听 Rust 崩溃守护事件：down→灰球连接中，up→立即刷新恢复
+  getCurrentWindow()
+    .listen<string>("sidecar-status", (event) => {
+      const status = event.payload;
+      if (status === "down") {
+        connected.value = false;
+      } else if (status === "up") {
+        connected.value = true;
+        refresh();
+      }
+    })
+    .then((un) => {
+      statusUnlisten = un;
+    })
+    .catch(() => {});
 });
 
 /** 首次启动检测：无已配置 provider → 弹 settings 窗口进入 onboarding */
@@ -78,6 +108,7 @@ async function checkOnboarding() {
 }
 onUnmounted(() => {
   if (timer) window.clearInterval(timer);
+  if (statusUnlisten) statusUnlisten();
 });
 
 function onMouseDown(e: MouseEvent) {
