@@ -37,10 +37,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="tokeneff Sidecar API", version="0.1.0", lifespan=lifespan)
 
-# 仅允许本机回环来源（前端是同机 WebView），收紧 CORS
+# 用正则覆盖任意回环端口 + tauri scheme（仅本机来源，收紧）
+# ★ B2 回流修复（Windows 联调踩坑）：Tauri dev server 的 origin 带动态端口
+# （如 http://127.0.0.1:1420），固定白名单 allow_origins 无法覆盖，改用正则。
+# 教训："日志显示 200"不等于"前端拿到数据"——无 CORS 头的响应会被 webview 丢弃。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://127.0.0.1", "tauri://localhost"],
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^tauri://",
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

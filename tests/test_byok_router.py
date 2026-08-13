@@ -2,7 +2,20 @@
 
 import json
 
+import pytest
+
 from tokeneff.proxy import byok_router
+
+
+@pytest.fixture(autouse=True)
+def _no_keyring_keys(monkeypatch):
+    """route 测试隔离 keyring：强制 get_api_key 返回 None，
+    使 router 走"请求头兜底"分支（用测试传入的 fake key）。
+
+    ★ 修复：route 优先用 keyring key，若 keyring 里有真实/B0 测试残留 key，
+    会覆盖测试传入的 fake key，导致断言不稳定。
+    """
+    monkeypatch.setattr(byok_router.cfg_module, "get_api_key", lambda provider: None)
 
 
 # ── route auth 分支 ─────────────────────────────────────────────────────────
