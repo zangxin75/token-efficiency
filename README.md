@@ -120,66 +120,70 @@ tokeneff dashboard
 
 ---
 
-## Windows 桌面端（推荐普通用户）
+## Windows desktop (recommended for end users)
 
-不想用命令行？下载 Windows 安装包，开箱即用，带悬浮球 / 系统托盘 / 设置向导。
+Prefer not to use the CLI? Download the Windows installer — it ships with a
+floating cost widget, system tray, and a setup wizard.
 
-**下载**：前往 [Releases](https://github.com/zangxin75/token-efficiency/releases/latest)，
-下载 `tokeneff_0.1.0_x64-setup.exe`（约 48 MB），双击安装。
+**Download**: Go to [Releases](https://github.com/zangxin75/token-efficiency/releases/latest)
+and grab `tokeneff_0.1.0_x64-setup.exe` (~48 MB). Double-click to install.
 
-安装后：
-- **悬浮球**：桌面右下角悬浮球实时显示今日花费，悬停看详情
-- **系统托盘**：右键托盘图标可启停电表、打开设置、退出
-- **设置向导**：首次启动引导你选择计费模式（自带 Key 直连 / 平台网关）并配置 Key
-- **崩溃自愈**：电表 sidecar 意外退出会自动重启，无需手动干预
+After installing:
+- **Floating widget**: a small ball in the corner shows today's spend in real time; hover for details.
+- **System tray**: right-click the tray icon to start/stop the meter, open settings, or quit.
+- **Setup wizard**: on first launch it guides you through picking a billing mode (BYOK direct / platform gateway) and configuring your key.
+- **Crash self-healing**: if the meter sidecar dies, it restarts automatically — no manual intervention.
 
-> ⚠️ 安装器不含 Python 运行时。电表 sidecar 需要本机预装 **Python 3.10+**（加到 PATH）。
-> 开发者可参考下文 [Development](#development) 从源码构建。
+> ⚠️ The installer does **not** bundle a Python runtime. The meter sidecar requires
+> **Python 3.10+** pre-installed on your machine (on PATH). Developers can build from
+> source — see [Development](#development).
 
 ---
 
-## 接入你的 AI 客户端（Claude Code / Codex / Cursor / …）
+## Connect your AI client (Claude Code / Codex / Cursor / …)
 
-tokeneff 是**协议感知的透明电表**：你的客户端用什么协议（Anthropic / OpenAI /
-Responses），它就转发到网关的同名端点并计费。接入只需把客户端的 API 地址指向电表。
+tokeneff is a **protocol-aware transparent meter**: whichever protocol your
+client speaks (Anthropic / OpenAI / Responses), it forwards to the matching
+gateway endpoint and bills every token. Connecting is just pointing your
+client's API URL at the meter.
 
-电表默认监听 `http://localhost:7860`。下面按客户端分别说明。
+The meter listens on `http://localhost:7860` by default. Per-client instructions below.
 
-### Claude Code（Anthropic 协议）
+### Claude Code (Anthropic protocol)
 
-Claude Code 走 `/v1/messages` 端点（Anthropic 格式）。有两种配置方式：
+Claude Code hits the `/v1/messages` endpoint (Anthropic format). Two ways to configure:
 
-**方式 A：环境变量**
+**Option A: environment variables**
 
 ```bash
 # Linux / macOS
 export ANTHROPIC_BASE_URL=http://localhost:7860
-export ANTHROPIC_AUTH_TOKEN=<你的平台 key 或任意占位符>
+export ANTHROPIC_AUTH_TOKEN=<your platform key, or any placeholder>
 claude
 ```
 
 ```powershell
 # Windows PowerShell
 $env:ANTHROPIC_BASE_URL="http://localhost:7860"
-$env:ANTHROPIC_AUTH_TOKEN="<你的 key>"
+$env:ANTHROPIC_AUTH_TOKEN="<your key>"
 claude
 ```
 
-**方式 B：独立 settings 文件（推荐，与默认 Claude Code 隔离）**
+**Option B: separate settings file (recommended — keeps it isolated from your default Claude Code)**
 
-创建 `~/.claude/tokeneff-claude.json`：
+Create `~/.claude/tokeneff-claude.json`:
 
 ```json
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://localhost:7860",
-    "ANTHROPIC_AUTH_TOKEN": "<你的 key>",
+    "ANTHROPIC_AUTH_TOKEN": "<your key>",
     "ANTHROPIC_MODEL": "claude-sonnet-4-6"
   }
 }
 ```
 
-在 PowerShell profile 里加一个快捷命令：
+Add a shortcut command in your PowerShell profile:
 
 ```powershell
 function claude-tokeneff {
@@ -187,30 +191,31 @@ function claude-tokeneff {
 }
 ```
 
-之后运行 `claude-tokeneff` 即可走电表计费，普通 `claude` 不受影响。
+Now `claude-tokeneff` routes through the meter; plain `claude` is unaffected.
 
-> 💡 **模型别名**：若你的全局 settings 里配了模型别名映射（如
-> `claude-sonnet-4-6 → glm-5.1`），Claude Code 会把别名后的模型名发给电表。
-> 电表按**端点**（`/v1/messages`）判定协议格式，不依赖模型名，所以别名不影响计费。
+> 💡 **Model aliases**: if your global settings map model aliases (e.g.
+> `claude-sonnet-4-6 → glm-5.1`), Claude Code sends the aliased name to the meter.
+> The meter decides protocol by **endpoint** (`/v1/messages`), not model name — so
+> aliases don't affect billing.
 
-### Codex（OpenAI Responses 协议）
+### Codex (OpenAI Responses protocol)
 
-Codex 走 `/v1/responses` 端点。把 base URL 指向电表：
+Codex hits `/v1/responses`. Point its base URL at the meter:
 
 ```bash
-# Codex 配置
+# Codex config
 OPENAI_BASE_URL=http://localhost:7860/v1
-OPENAI_API_KEY=<你的 key>
+OPENAI_API_KEY=<your key>
 ```
 
-电表会把 `/v1/responses` 透传到网关同名端点并计费。
+The meter forwards `/v1/responses` to the gateway's same-named endpoint and bills it.
 
-### Cursor / Cline / 其他 OpenAI 兼容客户端
+### Cursor / Cline / other OpenAI-compatible clients
 
-走 `/v1/chat/completions` 端点（OpenAI 格式）。在客户端设置里：
+These hit `/v1/chat/completions` (OpenAI format). In the client settings:
 
 - **Base URL**: `http://localhost:7860/v1`
-- **API Key**: `<你的 key>`
+- **API Key**: `<your key>`
 
 ### Python / OpenAI SDK
 
@@ -218,7 +223,7 @@ OPENAI_API_KEY=<你的 key>
 from openai import OpenAI
 client = OpenAI(
     base_url="http://localhost:7860/v1",
-    api_key="<你的 key>",  # BYOK 模式下电表会注入你配置的 key
+    api_key="<your key>",  # in BYOK mode the meter injects your configured key
 )
 resp = client.chat.completions.create(
     model="deepseek-v4-flash",
@@ -226,15 +231,15 @@ resp = client.chat.completions.create(
 )
 ```
 
-### 计费模式说明
+### Billing modes
 
-| 模式 | 适用 | Key 来自 | 电表行为 |
-|------|------|----------|----------|
-| **BYOK**（自带 Key） | 有上游厂商 Key | 系统钥匙串 | 用你的 Key 直连上游，按官方价计费 |
-| **platform**（平台网关） | 用 tokeneff 平台 | 平台 Key | 转发到 tokeneff 网关，按平台价计费 |
+| Mode | Best for | Key source | Meter behavior |
+|------|----------|------------|----------------|
+| **BYOK** (bring your own key) | You have an upstream vendor key | System keyring | Dials upstream directly with your key, bills at official price |
+| **platform** (platform gateway) | You use the tokeneff platform | Platform key | Forwards to the tokeneff gateway, bills at platform price |
 
-用 `tokeneff setup` 切换模式。两种模式下，所有客户端协议（Anthropic / OpenAI /
-Responses）都自动适配。
+Switch modes with `tokeneff setup`. Under either mode, all client protocols
+(Anthropic / OpenAI / Responses) adapt automatically.
 
 ---
 
@@ -245,11 +250,11 @@ your client (Claude Code / Codex / Cursor / SDK)
     │  Anthropic (/v1/messages) · OpenAI (/v1/chat/completions) · Responses (/v1/responses)
     ▼
 tokeneff local proxy (localhost:7860)
-    ├─ endpoint routing: 按客户端端点透传到网关同名端点
-    ├─ protocol-aware: 网关侧处理 OpenAI ↔ Anthropic 格式转换
-    ├─ BYOK / platform: 按 mode 注入 key（BYOK 直连上游 / platform 转发网关）
-    ├─ billing: 解析 usage（input/output tokens）→ 本地定价 → 官方对比
-    └─ storage: SQLite 历史（只存 token 计数，不存 prompt 内容）
+    ├─ endpoint routing: forwards to the gateway's same-named endpoint by client path
+    ├─ protocol-aware: the gateway handles OpenAI ↔ Anthropic format conversion
+    ├─ BYOK / platform: injects key by mode (BYOK dials upstream / platform forwards to gateway)
+    ├─ billing: parses usage (input/output tokens) → local pricing → official-price compare
+    └─ storage: SQLite history (token counts only, no prompt content)
     ▼
 LLM upstream / TokenEff gateway (OpenAI / DeepSeek / GLM / Claude / ...)
 ```
