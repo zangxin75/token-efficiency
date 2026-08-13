@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# tokeneff sidecar 打包脚本（PyInstaller onefile）。
+# tokeneff sidecar build script (PyInstaller onefile).
 #
-# 用法: ./packaging/build-sidecar.sh
-# 产物: dist/tokeneff-sidecar (Linux) / tokeneff-sidecar.exe (Windows，需在 Windows 上跑)
+# Usage: ./packaging/build-sidecar.sh
+# Output: dist/tokeneff-sidecar (Linux) / tokeneff-sidecar.exe (Windows, must run on Windows)
 #
-# 关键: 通过 --additional-hooks-dir 注入 keyring hook（H1），
-#       否则打包后 keyrings.alt 兜底后端丢失，API key 无法存储。
+# Key: injects the keyring hook via --additional-hooks-dir (H1),
+#      otherwise the keyrings.alt fallback backend is missing after build and API keys cannot be stored.
 
 set -euo pipefail
 
@@ -16,13 +16,13 @@ if [ ! -x "$PYTHON" ]; then
   PYTHON="python3"
 fi
 
-echo "=== 安装/确认 PyInstaller ==="
+echo "=== Install / verify PyInstaller ==="
 "$PYTHON" -m pip install -q pyinstaller 2>&1 | tail -2 || true
 
-echo "=== 清理旧产物 ==="
+echo "=== Clean previous build artifacts ==="
 rm -rf packaging/pyinstaller_build dist/tokeneff-sidecar*
 
-echo "=== 打包 sidecar（onefile + keyring hook）==="
+echo "=== Build sidecar (onefile + keyring hook) ==="
 "$PYTHON" -m PyInstaller \
   --onefile \
   --name tokeneff-sidecar \
@@ -44,5 +44,5 @@ echo "=== 打包 sidecar（onefile + keyring hook）==="
   packaging/sidecar_entry.py
 
 echo ""
-echo "=== 产物 ==="
-ls -lh dist/tokeneff-sidecar* 2>/dev/null || echo "（无产物，打包失败）"
+echo "=== Build artifacts ==="
+ls -lh dist/tokeneff-sidecar* 2>/dev/null || echo "(no artifacts, build failed)"

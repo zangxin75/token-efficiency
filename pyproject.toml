@@ -16,7 +16,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "rich>=13.0.0",
     "keyring>=25.0",
-    "keyrings.alt>=5.0",  # 无 DBus/桌面环境时 keyring 的文件后端兜底
+    "keyrings.alt>=5.0",  # keyring file backend fallback when no DBus / desktop environment
     "questionary>=2.0.0",
     "tomlkit>=0.13.0",
 ]

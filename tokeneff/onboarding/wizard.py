@@ -1,8 +1,8 @@
-"""配置向导：交互式引导用户配置 BYOK key。
+"""Config wizard: interactively guides the user to configure a BYOK key.
 
-关联设计文档 §5.3（run_setup_wizard 同步版）+ H-NEW-5（async 调用链）。
-MVP 简化版：检测 region → 选 provider → 配 key → verify → 存 keyring。
-完整中国模型申请引导留待 v0.2。
+See design doc §5.3 (run_setup_wizard sync version) + H-NEW-5 (async call chain).
+MVP simplified version: detect region → pick provider → set key → verify → store in keyring.
+Full Chinese-model registration guidance deferred to v0.2.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ console = Console()
 
 
 def run_setup_wizard() -> None:
-    """交互式配置向导（同步）。"""
+    """Interactive config wizard (sync)."""
     console.print()
     console.print("[bold cyan]⚡ tokeneff 配置向导[/bold cyan]")
     console.print("[dim]BYOK 模式：你自带 API key，tokeneff 只做本地计费，key 不离开本机[/dim]")
@@ -29,7 +29,7 @@ def run_setup_wizard() -> None:
 
     cfg = cfg_module.get_config()
 
-    # Step 1: 地域（自动检测 + 确认）
+    # Step 1: region (auto-detect + confirm)
     detected = detect_region()
     region = questionary.select(
         "你的地域？（影响定价货币 ¥/$）",
@@ -38,7 +38,7 @@ def run_setup_wizard() -> None:
     ).ask()
     cfg.region = region
 
-    # Step 2: 选 provider 配 key
+    # Step 2: pick a provider and set its key
     console.print()
     providers = list(PROVIDER_REGISTRY.keys())
     chosen = questionary.checkbox(
@@ -54,7 +54,7 @@ def run_setup_wizard() -> None:
             console.print("[dim]跳过[/dim]")
             continue
 
-        # verify（async，同步向导里用 asyncio.run）
+        # verify (async; uses asyncio.run inside the sync wizard)
         console.print(f"[dim]验证 {provider} key...[/dim]")
         ok, msg = asyncio.run(byok_router.verify_key(provider, key))
         console.print(f"  {msg}")
@@ -66,7 +66,7 @@ def run_setup_wizard() -> None:
             if still:
                 cfg_module.set_api_key(provider, key)
 
-    # Step 3: 预算（可选）
+    # Step 3: budget (optional)
     console.print()
     budget = questionary.text(
         f"月度预算（{cfg.get_currency()}，0=不限）：",
@@ -75,14 +75,14 @@ def run_setup_wizard() -> None:
     try:
         budget_val = float(budget or 0)
         if cfg.region == "cn":
-            # CN 预算统一存 USD（¥÷汇率）
+            # CN budget uniformly stored as USD (¥ ÷ exchange rate)
             cfg.budget_monthly_usd = round(budget_val / 7.2, 4)
         else:
             cfg.budget_monthly_usd = budget_val
     except ValueError:
         pass
 
-    # Step 4: 保存
+    # Step 4: save
     cfg_module.save(cfg)
     console.print()
     console.print("[bold green]✅ 配置完成！[/bold green]")

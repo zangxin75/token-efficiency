@@ -1,1 +1,1 @@
-"""电表展示：rich 表格输出。"""
+"""Meter display: rich table output."""

@@ -1,7 +1,7 @@
-"""端口自适应工具（★ M1 修订）。
+"""Port auto-discovery utility (★ M1 revision).
 
-sidecar 启动时探测目标端口，被占用则递增重试，
-返回实际可用端口（写入 config + 回传前端显示）。
+On sidecar startup, probes the target port; if occupied, increments and retries,
+returning the actually available port (written to config + reported back to the frontend).
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import socket
 
 
 def is_port_free(port: int, host: str = "127.0.0.1") -> bool:
-    """探测端口是否可用（能 bind 即空闲）。"""
+    """Probe whether a port is available (bindable means free)."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -21,18 +21,18 @@ def is_port_free(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def find_free_port(preferred: int, max_port: int = None, host: str = "127.0.0.1") -> int:
-    """从 preferred 起递增探测，返回第一个可用端口。
+    """Probe incrementally starting from preferred, return the first available port.
 
     Args:
-        preferred: 期望端口
-        max_port: 探测上限（默认 preferred + 30）
-        host: 绑定地址（默认回环，降低杀软误报）
+        preferred: desired port
+        max_port: probe upper bound (default preferred + 30)
+        host: bind address (default loopback, reduces AV false positives)
 
     Returns:
-        实际可用端口
+        the actually available port
 
     Raises:
-        RuntimeError: 探测到上限仍无可用端口
+        RuntimeError: still no available port when the upper bound is reached
     """
     if max_port is None:
         max_port = preferred + 30

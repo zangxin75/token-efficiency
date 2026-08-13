@@ -1,8 +1,8 @@
-"""成本计算器：读 pricing_global.json 本地算成本。
+"""Cost calculator: reads pricing_global.json to compute cost locally.
 
-复用 overseas/billing.py 的计费逻辑（load_pricing/get_model_pricing）。
-BYOK 模式：charged = 用户向上游实付价（official_input/output）。
-关联设计文档 §3.5。
+Reuses the billing logic from overseas/billing.py (load_pricing/get_model_pricing).
+BYOK mode: charged = what the user actually pays upstream (official_input/output).
+See design doc §3.5.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from .types import CostBreakdown, UsageResult
 
 PRICING_PATH = Path(__file__).parent.parent / "pricing" / "pricing_global.json"
 
-# 未知模型的兜底定价（$/M tokens），避免漏计费
+# Fallback pricing for unknown models ($/M tokens) to avoid missed billing
 _FALLBACK = {"input": 1.0, "output": 2.0}
 
 
@@ -26,7 +26,7 @@ def load_pricing() -> dict:
 
 
 def get_model_pricing(model: str) -> dict | None:
-    """查模型定价（中国模型优先，其次国际模型）。返回 None=未知。"""
+    """Look up model pricing (Chinese models first, then international). Returns None if unknown."""
     data = load_pricing()
     for key in ("models", "international_models"):
         entries = data.get(key, {})
@@ -42,17 +42,18 @@ def get_model_pricing(model: str) -> dict | None:
 
 
 def calculate(model: str, usage: UsageResult, mode: str = "byok") -> CostBreakdown:
-    """计算单次请求成本。
+    """Compute the cost of a single request.
 
-    BYOK 模式：用户直连上游，charged = 官方原价（用户向上游实付），saved = 0。
-    平台模式：charged = our_*（我们的售价），official = 官方原价，saved > 0。
+    BYOK mode: the user connects to upstream directly; charged = official price
+    (what the user actually pays upstream), saved = 0.
+    Platform mode: charged = our_* (our selling price), official = official price, saved > 0.
     """
     pricing = get_model_pricing(model)
     in_m = usage.input_tokens / 1_000_000
     out_m = usage.completion_tokens / 1_000_000
 
     if pricing is None:
-        # 未知模型：用兜底价，official=charged
+        # Unknown model: use fallback price, official=charged
         charged = in_m * _FALLBACK["input"] + out_m * _FALLBACK["output"]
         return CostBreakdown(
             charged=round(charged, 6), official=round(charged, 6),
@@ -63,11 +64,11 @@ def calculate(model: str, usage: UsageResult, mode: str = "byok") -> CostBreakdo
     official = in_m * pricing["official_input"] + out_m * pricing["official_output"]
 
     if mode == "byok":
-        # BYOK：用户向上游实付 = 官方原价，无加价无节省
+        # BYOK: what the user pays upstream = official price; no markup, no savings
         charged = official
         saved = 0.0
     else:
-        # 平台模式：charged = our_* 售价
+        # Platform mode: charged = our_* selling price
         charged = in_m * pricing["input"] + out_m * pricing["output"]
         saved = official - charged
 

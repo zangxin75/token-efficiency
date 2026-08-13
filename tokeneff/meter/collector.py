@@ -1,6 +1,6 @@
-"""电表采集器：聚合用量 + 计算成本 + 写入存储。
+"""Meter collector: aggregates usage + computes cost + writes to storage.
 
-关联设计文档 §3.4-补（Collector 定义 + M-NEW-2 currency 传入）。
+See design doc §3.4-supplement (Collector definition + M-NEW-2 currency passing).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .types import CostBreakdown, UsageRecord, UsageResult
 
 
 class Collector:
-    """电表数据收集器。"""
+    """Meter data collector."""
 
     def __init__(self, store: Optional[UsageStore] = None):
         self.store = store or UsageStore()
@@ -36,9 +36,9 @@ class Collector:
         cost: Optional[CostBreakdown] = None,
         elapsed: Optional[float] = None,
     ) -> None:
-        """最终记录：计算成本并写入 SQLite。
+        """Final recording: compute cost and write to SQLite.
 
-        cost 可为 None（此时本地算）；currency 从 config.get_currency() 取。
+        cost may be None (compute locally in that case); currency is taken from config.get_currency().
         """
         if not usage.has_data:
             return
@@ -60,9 +60,11 @@ class Collector:
             latency_ms=int(elapsed * 1000) if elapsed else 0,
         )
         await self.store.record(rec)
-        # 即时落盘：电表是低频场景（每条都是真实花费），且 proxy(7860) 与
-        # sidecar(7861) 是独立进程，共享同一 SQLite 文件——只有写库后对方才读得到。
-        # store.record 默认攒 50 条才 flush，跨进程时缓冲数据会丢失，故此处立即 flush。
+        # Persist immediately: metering is low-frequency (every record is a real cost), and
+        # proxy(7860) and sidecar(7861) are separate processes sharing the same SQLite file —
+        # the other side can only read data after it is written to the DB.
+        # store.record buffers 50 records before flushing by default; across processes that
+        # buffered data would be lost, so flush immediately here.
         await self.store.flush()
 
     @staticmethod
@@ -80,5 +82,5 @@ class Collector:
             return "byok"
 
 
-# 全局单例
+# Global singleton
 collector = Collector()

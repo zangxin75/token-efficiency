@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
-// outerPosition / currentMonitor 返回物理像素，用 PhysicalPosition 避免缩放换算错位
+// outerPosition / currentMonitor return physical pixels; use PhysicalPosition to avoid scaling miscalculation
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import {
   fetchSummary,
@@ -21,17 +21,17 @@ const currency = ref("USD");
 const connected = ref(false);
 
 let timer: number | undefined;
-// 拖拽 vs 点击判别：mousedown 只记录坐标；mousemove 超阈值才启动系统拖拽，
-// 否则 startDragging 会进入模态拖动循环、吞掉 click，导致点击无法展开面板
+// Drag vs click discrimination: mousedown only records coordinates; mousemove beyond threshold starts system drag.
+// Otherwise startDragging enters a modal drag loop that swallows click, preventing the panel from expanding.
 let downX = 0;
 let downY = 0;
 let dragStarted = false;
-// 首次启动 onboarding 检测守卫，避免重复弹窗
+// First-launch onboarding check guard, prevents repeated popups
 let onboardingChecked = false;
 
 const symbol = computed(() => currencySymbol(currency.value));
 
-/** 颜色逻辑：未设预算(null)或 <60 → 绿；60-80 → 黄；≥80 → 红；离线 → 灰 */
+/** Color logic: no budget set (null) or <60 → green; 60-80 → yellow; ≥80 → red; offline → gray */
 function ballColor(): string {
   if (!connected.value) return "#9ca3af";
   if (budgetPct.value === null) return "#22c55e";
@@ -53,25 +53,25 @@ async function refresh() {
   }
 }
 
-// B4：平台交互形态（ball/tray）。Windows 恒为 ball；tray 形态（Linux Wayland）下
-// 理论上应隐藏悬浮球靠托盘，但本机主场景是 ball，此处仅记录供未来 Linux 分支用。
+// B4: platform interaction form (ball/tray). Windows is always ball; in tray form (Linux Wayland)
+// the floating ball should theoretically be hidden in favor of the tray, but the primary scenario here is ball — this is recorded for a future Linux branch.
 const form = ref<"ball" | "tray">("ball");
-// B4：sidecar 崩溃守护事件监听（Rust watchdog emit "sidecar-status"）
+// B4: sidecar crash-watchdog event listener (Rust watchdog emits "sidecar-status")
 let statusUnlisten: (() => void) | undefined;
 
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
   checkOnboarding();
-  // 平台检测
+  // Platform detection
   detectForm().then((f) => {
     form.value = f;
-    // tray 形态（Linux Wayland）隐藏悬浮球，交给系统托盘
+    // tray form (Linux Wayland) hides the floating ball, deferring to the system tray
     if (f === "tray") {
       getCurrentWindow().hide().catch(() => {});
     }
   });
-  // 监听 Rust 崩溃守护事件：down→灰球连接中，up→立即刷新恢复
+  // Listen for Rust crash-watchdog events: down → gray ball connecting, up → refresh immediately to recover
   getCurrentWindow()
     .listen<string>("sidecar-status", (event) => {
       const status = event.payload;
@@ -88,7 +88,7 @@ onMounted(() => {
     .catch(() => {});
 });
 
-/** 首次启动检测：无已配置 provider → 弹 settings 窗口进入 onboarding */
+/** First-launch check: no configured provider → open settings window into onboarding */
 async function checkOnboarding() {
   if (onboardingChecked) return;
   onboardingChecked = true;
@@ -102,7 +102,7 @@ async function checkOnboarding() {
       }
     }
   } catch {
-    // sidecar 未就绪时不弹窗，避免打断；用户连上后重启会再检测
+    // Do not pop up when sidecar is not ready, to avoid interrupting; re-check on restart once connected
     onboardingChecked = false;
   }
 }
@@ -118,17 +118,17 @@ function onMouseDown(e: MouseEvent) {
 }
 
 function onMouseMove(e: MouseEvent) {
-  // 按住状态下，移动超阈值才启动拖拽（只启动一次）
+  // While pressed, only start drag when movement exceeds threshold (start once)
   if (e.buttons === 0 || dragStarted) return;
   if (Math.abs(e.screenX - downX) > 4 || Math.abs(e.screenY - downY) > 4) {
     dragStarted = true;
-    // 交给系统拖动循环；用户取消拖动是正常行为，吞掉 reject
+    // Handed off to system drag loop; user canceling the drag is normal, swallow the reject
     getCurrentWindow().startDragging().catch(() => {});
   }
 }
 
 function onClick() {
-  // 拖拽已启动则不展开（保留之前的判别作为兜底）
+  // If drag already started, do not expand (kept as a fallback discriminator)
   if (dragStarted) return;
   togglePanel();
 }
@@ -136,28 +136,28 @@ function onClick() {
 async function togglePanel() {
   const panel = await WebviewWindow.getByLabel("panel");
   if (!panel) return;
-  // 面板定位：默认球右侧；右侧空间不足则翻到左侧；纵向 clamp 防超出屏幕底部
+  // Panel positioning: default to the right of the ball; flip to the left when no room on the right; clamp vertically so it doesn't exceed the screen bottom
   try {
     const win = getCurrentWindow();
-    const pos = await win.outerPosition(); // 物理像素
-    // 物理像素下的面板尺寸（logical 320x420 × 缩放比）
+    const pos = await win.outerPosition(); // physical pixels
+    // Panel size in physical pixels (logical 320x420 × scale factor)
     const panelW = 320;
     const panelH = 420;
     const ballW = 90;
-    let px = pos.x + ballW + 6; // 球右侧
-    // 拿当前显示器尺寸判断边界
+    let px = pos.x + ballW + 6; // right of the ball
+    // Use current monitor size to check boundaries
     const monitor = await currentMonitor();
     if (monitor) {
       const screenW = monitor.size.width;
       const scale = monitor.scaleFactor || 1;
       const panelPhysW = panelW * scale;
       const panelPhysH = panelH * scale;
-      // 右侧放不下 → 翻到球左侧
+      // Doesn't fit on the right → flip to the left of the ball
       if (px + panelPhysW > screenW) {
         px = pos.x - panelPhysW - 6;
         if (px < 0) px = Math.max(0, screenW - panelPhysW);
       }
-      // 纵向：球太靠下，面板上移避免超出底部
+      // Vertical: ball too low, shift panel up to avoid exceeding the bottom
       let py = pos.y;
       const screenH = monitor.size.height;
       if (py + panelPhysH > screenH) {
@@ -165,11 +165,11 @@ async function togglePanel() {
       }
       await panel.setPosition(new PhysicalPosition(px, py));
     } else {
-      // 无显示器信息，退回逻辑坐标的简单右侧定位
+      // No monitor info, fall back to a simple right-side positioning in logical coordinates
       await panel.setPosition(new LogicalPosition(pos.x + ballW + 6, pos.y));
     }
   } catch {
-    /* 定位失败也照常 show */
+    /* Show even if positioning failed */
   }
   await panel.show();
   await panel.setFocus();

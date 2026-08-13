@@ -47,7 +47,7 @@ coverage.xml
 *~
 .DS_Store
 
-# Local data（用户隐私，绝不提交）
+# Local data (user privacy, never commit)
 *.db
 *.db-shm
 *.db-wal
@@ -60,19 +60,19 @@ Thumbs.db
 # OMC runtime state
 .omc/
 
-# PyInstaller 中间产物（保留 build/hooks、build/*.sh、build/sidecar_entry.py）
+# PyInstaller intermediates (keep build/hooks, build/*.sh, build/sidecar_entry.py)
 pyinstaller_build/
 build/bdist.*/
 build/lib/
 
-# Tauri / Node（desktop 子项目）
+# Tauri / Node (desktop subproject)
 desktop/node_modules/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/dist/
 desktop/*.log
 
-# 临时诊断/运行日志
+# Temporary diagnostics / runtime logs
 sidecar-src.log
 sidecar-exe.log
 sidecar*.log

@@ -1,10 +1,10 @@
-"""本地 SQLite 用量存储。
+"""Local SQLite usage storage.
 
-关联设计文档 §3.7、§7.1（N3-M2 SQLite 并发优化）：
-- 长连接 self._db 复用
-- WAL 模式（读/写不互斥）
-- busy_timeout 避免锁超时
-- 批量写缓冲（满 50 条或定时 flush）
+See design doc §3.7, §7.1 (N3-M2 SQLite concurrency optimization):
+- long-lived connection self._db reused
+- WAL mode (reads/writes do not block each other)
+- busy_timeout to avoid lock timeouts
+- batch write buffer (flush at 50 records or on timer)
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_records(timestamp);
 
 
 class UsageStore:
-    """本地 SQLite 用量存储（N3-M2 优化版）。"""
+    """Local SQLite usage storage (N3-M2 optimized version)."""
 
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
@@ -50,7 +50,7 @@ class UsageStore:
         self._flush_lock = asyncio.Lock()
 
     async def init(self):
-        """初始化长连接 + WAL 模式。"""
+        """Initialize the long-lived connection + WAL mode."""
         self._db = await aiosqlite.connect(self.db_path)
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA synchronous=NORMAL")
@@ -59,19 +59,19 @@ class UsageStore:
         await self._db.commit()
 
     async def close(self):
-        """关闭长连接。"""
+        """Close the long-lived connection."""
         if self._db:
             await self._db.close()
             self._db = None
 
     async def record(self, rec: UsageRecord):
-        """写入缓冲，满 50 条或超 5 秒 flush 一次。"""
+        """Write to buffer; flush once at 50 records or after 5 seconds."""
         self._buffer.append(rec)
         if len(self._buffer) >= 50:
             await self._flush()
 
     async def _flush(self):
-        """批量写入。"""
+        """Batch write."""
         if not self._buffer or self._db is None:
             return
         async with self._flush_lock:
@@ -89,13 +89,13 @@ class UsageStore:
             await self._db.commit()
 
     async def flush(self):
-        """手动 flush（供外部调用）。"""
+        """Manual flush (for external callers)."""
         await self._flush()
 
-    # ── 读方法（WAL 模式读不互斥）───────────────────────────────────────
+    # ── read methods (WAL mode: reads do not block) ───────────────────────────────
 
     async def get_today_total(self, currency: str = None) -> float:
-        """今日总花费。可选按 currency 过滤（§3.6 避免 CNY/USD 混加）。"""
+        """Today's total spend. Optionally filter by currency (§3.6 to avoid mixing CNY/USD)."""
         today = datetime.now().strftime("%Y-%m-%d")
         sql = "SELECT COALESCE(SUM(charged_amount), 0) FROM usage_records WHERE timestamp >= ?"
         params = [today]
@@ -107,7 +107,7 @@ class UsageStore:
             return row[0] if row else 0.0
 
     async def get_month_total(self, currency: str = None) -> float:
-        """本月累计花费。可选按 currency 过滤。"""
+        """Month-to-date spend. Optionally filter by currency."""
         month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
         sql = "SELECT COALESCE(SUM(charged_amount), 0) FROM usage_records WHERE timestamp >= ?"
         params = [month_start]
@@ -119,7 +119,7 @@ class UsageStore:
             return row[0] if row else 0.0
 
     async def get_model_breakdown_today(self) -> list[dict]:
-        """今日各模型花费分布。"""
+        """Today's spend breakdown per model."""
         today = datetime.now().strftime("%Y-%m-%d")
         async with self._db.execute(
             """SELECT model, SUM(charged_amount) as cost, SUM(input_tokens+output_tokens) as tokens
@@ -130,7 +130,7 @@ class UsageStore:
             return [{"model": r[0], "cost": r[1], "tokens": r[2]} for r in rows]
 
     async def get_recent_rate(self) -> float:
-        """最近 7 天的日均花费。"""
+        """Daily average spend over the last 7 days."""
         week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         async with self._db.execute(
             "SELECT COALESCE(SUM(charged_amount), 0) FROM usage_records WHERE timestamp >= ?",
@@ -140,7 +140,7 @@ class UsageStore:
             return (row[0] / 7) if row and row[0] else 0.0
 
     async def get_history_30d(self) -> list[UsageRecord]:
-        """最近 30 天历史（供 predictor 用）。"""
+        """History for the last 30 days (for the predictor)."""
         d30 = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         async with self._db.execute(
             """SELECT timestamp, model, mode, input_tokens, output_tokens,
@@ -160,7 +160,7 @@ class UsageStore:
             ]
 
     async def get_total_saved(self) -> float:
-        """累计节省（official - charged）。"""
+        """Cumulative savings (official - charged)."""
         async with self._db.execute(
             "SELECT COALESCE(SUM(saved_amount), 0) FROM usage_records",
         ) as cur:
@@ -168,7 +168,7 @@ class UsageStore:
             return row[0] if row else 0.0
 
     async def clear(self):
-        """清空所有用量数据。"""
+        """Clear all usage data."""
         if self._db is None:
             return
         await self._db.execute("DELETE FROM usage_records")

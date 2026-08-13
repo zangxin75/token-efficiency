@@ -1,35 +1,27 @@
-## 摘要
+## Summary
 
-请简要描述此 PR 的内容。
+Briefly describe what this PR does.
 
-## 关联 Issue
+## Related issue
 
 Fixes #(issue-number)
 
-## 变更类型
+## Change type
 
-- [ ] Bug 修复（非破坏性变更）
-- [ ] 新功能（非破坏性变更）
-- [ ] 破坏性变更（需要同步更新配置或文档）
-- [ ] 文档更新
-- [ ] 重构 / 代码质量
+- [ ] Bug fix (non-breaking change)
+- [ ] New feature (non-breaking change)
+- [ ] Breaking change (requires updating config or docs)
+- [ ] Documentation update
+- [ ] Refactor / code quality
 
-## 测试
+## Tests
 
-- [ ] 本地测试通过
-- [ ] 影响了现有测试（需要更新）
-- [ ] 新增了测试覆盖
+- [ ] Tests pass locally
+- [ ] Existing tests are affected (need updating)
+- [ ] New test coverage added
 
-## 部署注意事项
+## Checklist
 
-- [ ] 需要执行数据库迁移（已提供 SQL）
-- [ ] 需要更新 `.env` 配置
-- [ ] 需要重建 Docker 镜像
-- [ ] 需要滚动更新（影响关键服务 `api-gateway`）
-- [ ] 无特殊部署要求
-
-## 检查清单
-
-- [ ] 我的代码遵循本项目的代码风格
-- [ ] 我已经自检了代码，没有明显问题
-- [ ] 我已经更新了相关文档（如 README / CLAUDE.md）
+- [ ] My code follows this project's code style
+- [ ] I have self-reviewed my code for obvious issues
+- [ ] I have updated relevant docs (e.g. README)

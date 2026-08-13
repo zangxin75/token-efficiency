@@ -1,4 +1,4 @@
-/* 全局重置 + 透明窗口背景 */
+/* Global reset + transparent window background */
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -16,7 +16,7 @@ body,
 #app {
   width: 100%;
   height: 100%;
-  /* 透明窗口关键：body 背景必须 transparent，否则 Windows 上会显示黑底 */
+  /* Transparent window key: body background must be transparent, otherwise Windows shows a black background */
   background: transparent;
   overflow: hidden;
 }

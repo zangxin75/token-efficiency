@@ -1,7 +1,7 @@
-"""BYOK 路由：用户自带 key 直连上游。
+"""BYOK routing: the user brings their own key and connects to upstream directly.
 
-关联设计文档 §4.3（route + auth_header）+ §4.3.1（adapt_request_body）+ §5.2（verify_key）。
-修订：N-C3（auth_header）/ N3-C3（verify POST）/ N3-C2（adapt 接线）。
+See design doc §4.3 (route + auth_header) + §4.3.1 (adapt_request_body) + §5.2 (verify_key).
+Revisions: N-C3 (auth_header) / N3-C3 (verify POST) / N3-C2 (adapt wiring).
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ class ByokRouterError(Exception):
 
 
 def _resolve_provider(model: str) -> Optional[str]:
-    """model → provider（先精确匹配，再前缀匹配）。"""
+    """model → provider (exact match first, then prefix match)."""
     if model in MODEL_TO_PROVIDER:
         return MODEL_TO_PROVIDER[model]
-    # 前缀匹配（如 gpt-4o-2024-08-06）
+    # Prefix match (e.g. gpt-4o-2024-08-06)
     for provider, info in PROVIDER_REGISTRY.items():
         for m in info.get("models", []):
             if model.startswith(m) or m.startswith(model.split("-")[0]):
@@ -32,20 +32,20 @@ def _resolve_provider(model: str) -> Optional[str]:
 
 
 def route(model: str, body: bytes, request_headers: dict) -> tuple[str, dict]:
-    """返回 (upstream_url, headers)。按 provider 的 auth_header 构造认证头。
+    """Return (upstream_url, headers). Build the auth header per the provider's auth_header.
 
-    ★ N-C3 修订：Anthropic 用 x-api-key，其他用 Authorization: Bearer。
+    ★ N-C3 revision: Anthropic uses x-api-key; others use Authorization: Bearer.
     """
     provider_name = _resolve_provider(model)
     if provider_name is None:
-        # 未知模型：默认当 openai 兼容，用请求自带的 Authorization
+        # Unknown model: default to OpenAI-compatible, use the request's own Authorization
         provider_name = "openai"
     provider = PROVIDER_REGISTRY[provider_name]
 
-    # 从 keyring 取该 provider 的 key
+    # Get this provider's key from keyring
     user_key = cfg_module.get_api_key(provider_name)
     if not user_key:
-        # 兜底：用请求头自带的 Authorization
+        # Fallback: use the Authorization from the request headers
         auth = request_headers.get("authorization", "") or request_headers.get("Authorization", "")
         user_key = auth[7:].strip() if auth.lower().startswith("bearer ") else auth
 
@@ -63,10 +63,11 @@ def route(model: str, body: bytes, request_headers: dict) -> tuple[str, dict]:
 
 
 def adapt_request_body(body: bytes, provider_format: str) -> bytes:
-    """★ §4.3.1 / N3-C2：OpenAI ↔ Anthropic 格式转换。
+    """★ §4.3.1 / N3-C2: OpenAI ↔ Anthropic format conversion.
 
-    用户用 OpenAI SDK 发请求，但 Anthropic/Kimi-Coding 用 /v1/messages（Anthropic 格式）。
-    需把 OpenAI 的 messages（含 system role）转成 Anthropic 的顶层 system + messages。
+    The user sends requests via the OpenAI SDK, but Anthropic/Kimi-Coding use
+    /v1/messages (Anthropic format). Convert OpenAI messages (including the system role)
+    into Anthropic's top-level system + messages.
     """
     if provider_format != "anthropic":
         return body
@@ -78,13 +79,13 @@ def adapt_request_body(body: bytes, provider_format: str) -> bytes:
     out: dict = {"model": data.get("model")}
     messages = data.get("messages", [])
 
-    # 剥离 system message 到顶层
+    # Peel the system message out to the top level
     system_parts = [m["content"] for m in messages if m.get("role") == "system"]
     if system_parts:
         out["system"] = "\n\n".join(str(p) for p in system_parts)
     out["messages"] = [m for m in messages if m.get("role") != "system"]
 
-    # max_tokens 在 Anthropic 是必填
+    # max_tokens is required for Anthropic
     out["max_tokens"] = data.get("max_tokens", 4096)
     if "temperature" in data:
         out["temperature"] = data["temperature"]
@@ -95,7 +96,7 @@ def adapt_request_body(body: bytes, provider_format: str) -> bytes:
 
 
 def get_provider_format(model: str) -> str:
-    """返回 model 对应 provider 的 format（openai/anthropic）。"""
+    """Return the format (openai/anthropic) of the provider for the given model."""
     provider_name = _resolve_provider(model)
     if provider_name is None:
         return "openai"
@@ -103,10 +104,10 @@ def get_provider_format(model: str) -> str:
 
 
 async def verify_key(provider: str, api_key: str) -> tuple[bool, str]:
-    """验证 API key 是否有效。
+    """Verify whether an API key is valid.
 
-    ★ N-C3 + N3-C3：按 auth_header 构造头，按 verify_method 选 GET/POST。
-    Anthropic /v1/messages 是 POST-only（GET 会 405 误报 key 无效）。
+    ★ N-C3 + N3-C3: build the header per auth_header, choose GET/POST per verify_method.
+    Anthropic /v1/messages is POST-only (GET returns 405, falsely reporting the key as invalid).
     """
     info = PROVIDER_REGISTRY.get(provider)
     if not info:
@@ -134,7 +135,7 @@ async def verify_key(provider: str, api_key: str) -> tuple[bool, str]:
                 resp = await client.post(url, headers=headers, json=probe_body)
             else:
                 resp = await client.get(url, headers=headers)
-        # 200=有效；429=有效但限流；401=无效；403=无权限
+        # 200=valid; 429=valid but rate-limited; 401=invalid; 403=no permission
         if resp.status_code in (200, 429):
             return True, "✅ Key verified"
         elif resp.status_code == 401:

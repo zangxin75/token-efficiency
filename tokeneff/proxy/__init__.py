@@ -1,1 +1,1 @@
-"""本地代理：BYOK 路由 + 请求拦截计费。"""
+"""Local proxy: BYOK routing + request interception for billing."""

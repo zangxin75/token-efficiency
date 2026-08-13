@@ -14,19 +14,19 @@ import {
   type ProviderInfo,
 } from "./sidecar";
 
-// 加载状态：null=未确定，true=需 onboarding，false=常规设置
+// Load state: null=undetermined, true=onboarding needed, false=regular settings
 const needsOnboarding = ref<boolean | null>(null);
 const config = ref<AppConfig | null>(null);
 const loadErr = ref("");
 
-// 标签页
+// Tabs
 type Tab = "provider" | "budget" | "region" | "startup";
 const activeTab = ref<Tab>("provider");
 
-// 接入模式（B3.1）：byok 自带 provider key / platform 用 tokeneff 网关 key
+// Access mode (B3.1): byok = own provider key / platform = tokeneff gateway key
 const mode = ref<"byok" | "platform">("byok");
 
-// provider 标签（BYOK）
+// Provider tab (BYOK)
 const providers = ref<ProviderInfo[]>([]);
 const selProvider = ref("");
 const apiKey = ref("");
@@ -34,23 +34,23 @@ const verifyState = ref<"idle" | "verifying" | "ok" | "fail">("idle");
 const verifyMsg = ref("");
 const saveMsg = ref("");
 
-// 网关标签（platform，B3.1）
+// Gateway tab (platform, B3.1)
 const platformKey = ref("");
 const platformUrl = ref("");
 const platformVerifyState = ref<"idle" | "verifying" | "ok" | "fail">("idle");
 const platformVerifyMsg = ref("");
 const platformSaveMsg = ref("");
 
-// 预算标签
+// Budget tab
 const budget = ref(10);
 const threshold = ref(80);
 const budgetSaved = ref(false);
 
-// 区域标签
+// Region tab
 const region = ref("CN");
 const regionSaved = ref(false);
 
-// 启动标签（autostart 插件未集成，置灰）
+// Startup tab (autostart plugin not integrated, grayed out)
 const autostart = ref(false);
 const autostartUnavailable = ref(true);
 
@@ -63,7 +63,7 @@ async function load() {
     region.value = config.value.region || "CN";
     mode.value = (config.value.mode as "byok" | "platform") || "byok";
     platformUrl.value = config.value.platform_url || "";
-    // onboarding 判定：BYOK 无 provider 或 platform 无 key
+    // Onboarding check: BYOK has no provider, or platform has no key
     const byokEmpty = (config.value.providers_configured?.length ?? 0) === 0;
     const platformEmpty = !config.value.has_platform_key;
     needsOnboarding.value =
@@ -75,18 +75,18 @@ async function load() {
   }
 }
 
-// 切换接入模式（B3.1）
+// Switch access mode (B3.1)
 async function switchMode(m: "byok" | "platform") {
   if (m === mode.value) return;
   mode.value = m;
   try {
     await updateConfig({ mode: m });
   } catch {
-    /* 忽略，下次 load 会修正 */
+    /* ignore, next load will correct it */
   }
 }
 
-// 网关 key 验证 + 存储（B3.1）
+// Gateway key verify + store (B3.1)
 async function doPlatformVerify() {
   if (!platformKey.value) return;
   platformVerifyState.value = "verifying";
@@ -108,7 +108,7 @@ async function doPlatformVerify() {
   }
 }
 
-// 网关地址变化时防抖保存（非敏感配置，走 /api/config）
+// Debounce-save on gateway address change (non-sensitive config, via /api/config)
 let urlSaveTimer: number | undefined;
 watch(platformUrl, (v) => {
   if (urlSaveTimer) window.clearTimeout(urlSaveTimer);
@@ -116,22 +116,22 @@ watch(platformUrl, (v) => {
     try {
       await updateConfig({ platform_url: v });
     } catch {
-      /* 忽略 */
+      /* ignore */
     }
   }, 500);
 });
 
 onMounted(() => {
   load();
-  // 拦截标题栏 × 关闭：改为隐藏，避免窗口被销毁后再次 openSettings 找不到窗口。
-  // Tauri decorations:true 的 × 默认触发 close（销毁），这里阻止默认、改 hide。
+  // Intercept titlebar × close: hide instead, so the window isn't destroyed and openSettings can find it again.
+  // Tauri decorations:true × triggers close (destroy) by default; here we prevent default and hide instead.
   getCurrentWindow().onCloseRequested(async (e) => {
     e.preventDefault();
     await getCurrentWindow().hide();
   });
 });
 
-// ── provider 标签操作 ───────────────────────────────────────────────────────
+// ── provider tab operations ───────────────────────────────────────────────────────
 async function doVerify() {
   if (!selProvider.value || !apiKey.value) return;
   verifyState.value = "verifying";
@@ -141,10 +141,10 @@ async function doVerify() {
     if (r.ok) {
       verifyState.value = "ok";
       verifyMsg.value = r.message || "Key 有效";
-      // 验证通过自动存储
+      // Auto-store on verify success
       const s = await saveKey(selProvider.value, apiKey.value);
       saveMsg.value = s.ok ? "已验证并存储" : s.error || "存储失败";
-      // 刷新 provider configured 状态
+      // Refresh provider configured state
       providers.value = await fetchProviders();
     } else {
       verifyState.value = "fail";
@@ -156,7 +156,7 @@ async function doVerify() {
   }
 }
 
-// ── 预算保存 ────────────────────────────────────────────────────────────────
+// ── budget save ────────────────────────────────────────────────────────────────
 async function saveBudget() {
   try {
     await updateConfig({
@@ -166,22 +166,22 @@ async function saveBudget() {
     budgetSaved.value = true;
     setTimeout(() => (budgetSaved.value = false), 1500);
   } catch {
-    /* 忽略 */
+    /* ignore */
   }
 }
 
-// ── 区域保存 ────────────────────────────────────────────────────────────────
+// ── region save ────────────────────────────────────────────────────────────────
 async function saveRegion() {
   try {
     await updateConfig({ region: region.value });
     regionSaved.value = true;
     setTimeout(() => (regionSaved.value = false), 1500);
   } catch {
-    /* 忽略 */
+    /* ignore */
   }
 }
 
-// ── Onboarding 完成回调 ─────────────────────────────────────────────────────
+// ── Onboarding done callback ─────────────────────────────────────────────────────
 async function onOnboardingDone() {
   await load();
   needsOnboarding.value = false;
@@ -190,16 +190,16 @@ async function onOnboardingDone() {
 
 <template>
   <div class="settings-root">
-    <!-- 加载中 -->
+    <!-- loading -->
     <div v-if="needsOnboarding === null" class="loading">
       <p v-if="loadErr" class="err">连接 sidecar 失败：{{ loadErr }}</p>
       <p v-else>⚡ 加载配置中…</p>
     </div>
 
-    <!-- 首次启动 → Onboarding -->
+    <!-- First launch → Onboarding -->
     <Onboarding v-else-if="needsOnboarding" @done="onOnboardingDone" />
 
-    <!-- 常规设置 -->
+    <!-- Regular settings -->
     <div v-else class="settings-shell">
       <nav class="tabs">
         <button
@@ -233,7 +233,7 @@ async function onOnboardingDone() {
         <div v-show="activeTab === 'provider'" class="pane">
           <h3>API Provider 管理</h3>
 
-          <!-- B3.1：接入模式选择 -->
+          <!-- B3.1: access mode selection -->
           <div class="field">
             <label>接入模式</label>
             <div class="mode-cards">
@@ -256,7 +256,7 @@ async function onOnboardingDone() {
             </div>
           </div>
 
-          <!-- BYOK 模式：provider + key -->
+          <!-- BYOK mode: provider + key -->
           <template v-if="mode === 'byok'">
             <div class="field">
               <label>选择 Provider</label>
@@ -309,7 +309,7 @@ async function onOnboardingDone() {
             </div>
           </template>
 
-          <!-- Platform 模式：网关 key -->
+          <!-- Platform mode: gateway key -->
           <template v-else>
             <div class="field">
               <label>tokeneff 网关 API Key</label>
@@ -352,7 +352,7 @@ async function onOnboardingDone() {
           </template>
         </div>
 
-        <!-- 预算 -->
+        <!-- budget -->
         <div v-show="activeTab === 'budget'" class="pane">
           <h3>月度预算</h3>
           <div class="field">
@@ -370,7 +370,7 @@ async function onOnboardingDone() {
           </div>
         </div>
 
-        <!-- 区域 -->
+        <!-- region -->
         <div v-show="activeTab === 'region'" class="pane">
           <h3>区域与币种</h3>
           <div class="field radio-group">
@@ -388,7 +388,7 @@ async function onOnboardingDone() {
           </div>
         </div>
 
-        <!-- 启动 -->
+        <!-- startup -->
         <div v-show="activeTab === 'startup'" class="pane">
           <h3>开机自启</h3>
           <div class="field">
@@ -499,7 +499,7 @@ textarea {
   font-family: monospace;
   resize: vertical;
 }
-/* B3.1：接入模式卡片选择器 */
+/* B3.1: access mode card selector */
 .mode-cards {
   display: grid;
   grid-template-columns: 1fr 1fr;

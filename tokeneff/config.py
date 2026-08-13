@@ -1,9 +1,9 @@
-"""tokeneff 配置管理。
+"""tokeneff configuration management.
 
-配置存 ~/.tokeneff/config.toml（非敏感字段），
-API key 存系统 keyring（敏感字段，明文不落盘）。
+Non-sensitive config is stored in ~/.tokeneff/config.toml;
+API keys are stored in the system keyring (sensitive, never written to disk in plaintext).
 
-关联设计文档 §4.5、§16.3（H-NEW-2 合并版 TokenEffConfig）。
+See design doc §4.5, §16.3 (H-NEW-2 merged TokenEffConfig).
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ import tomlkit
 
 try:
     import keyring
-    # 探测后端可用性：无 DBus/桌面环境时 SecretService 写入会抛 KeyringLocked，
-    # 探测失败则降级到 keyrings.alt 文件后端（纯本地文件，无需桌面服务）。
+    # Probe backend availability: without DBus/desktop environment SecretService
+    # writes raise KeyringLocked; on probe failure fall back to keyrings.alt file
+    # backend (plain local file, no desktop service required).
     try:
         keyring.set_password("tokeneff-probe", "probe", "probe")
         keyring.delete_password("tokeneff-probe", "probe")
@@ -27,7 +28,7 @@ try:
             keyring.set_keyring(PlaintextKeyring())
         except Exception:
             pass
-except ImportError:  # keyring 可能在某些无桌面环境不可用
+except ImportError:  # keyring may be unavailable in some headless environments
     keyring = None
 
 CONFIG_DIR = Path.home() / ".tokeneff"
@@ -40,13 +41,13 @@ _config: Optional["TokenEffConfig"] = None
 
 @dataclass
 class TokenEffConfig:
-    """tokeneff 配置（敏感 key 不在此，走 keyring）。"""
+    """tokeneff configuration (sensitive keys are not stored here; they go to keyring)."""
 
     mode: str = "byok"  # "byok" | "platform"
     region: str = ""  # "" | "cn" | "global"
     platform_url: str = ""
-    platform_key_ref: str = ""  # keyring 引用名（占位，实际 key 在 keyring）
-    budget_monthly_usd: float = 0.0  # 统一预算字段（CN 也存 USD，展示层换算 ¥）
+    platform_key_ref: str = ""  # keyring reference name (placeholder; actual key lives in keyring)
+    budget_monthly_usd: float = 0.0  # unified budget field (CN also stores USD; display layer converts to ¥)
     alert_threshold: float = 0.8
     proxy_port: int = 7860
 
@@ -58,14 +59,14 @@ class TokenEffConfig:
         return "https://global.tokeneff.com"
 
     def get_currency(self) -> str:
-        """根据 region 返回计费货币（CN→CNY，否则 USD）。"""
+        """Return the billing currency based on region (CN→CNY, otherwise USD)."""
         return "CNY" if self.region == "cn" else "USD"
 
     def get_budget(self) -> float:
         return self.budget_monthly_usd
 
 
-# ── keyring 读写 ──────────────────────────────────────────────────────────────
+# ── keyring read/write ──────────────────────────────────────────────────────────
 
 
 def _kr_get(account: str) -> Optional[str]:
@@ -83,7 +84,7 @@ def _kr_set(account: str, value: str) -> None:
     try:
         keyring.set_password(KEYRING_SERVICE, account, value)
     except Exception:
-        pass  # 无 keyring 后端时静默降级（开发环境）
+        pass  # silently degrade when no keyring backend available (dev environment)
 
 
 def get_api_key(provider: str) -> Optional[str]:
@@ -102,13 +103,13 @@ def set_platform_key(key: str) -> None:
     _kr_set(KEYRING_PLATFORM, key)
 
 
-# ── 配置文件读写 ──────────────────────────────────────────────────────────────
+# ── config file read/write ──────────────────────────────────────────────────────
 
 
 def save(cfg: "TokenEffConfig") -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     data = asdict(cfg)
-    # 不写敏感字段
+    # Do not write sensitive fields
     data.pop("platform_key_ref", None)
     doc = tomlkit.document()
     for k, v in data.items():

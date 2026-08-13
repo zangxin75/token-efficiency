@@ -1,7 +1,7 @@
-"""电表核心数据类型。
+"""Meter core data types.
 
-关联设计文档 §3.4-补（N-M2 补全 + M-NEW-1/M-NEW-2 字段对齐）。
-字段名与 store.py 的 SQL schema 对齐：output_tokens（非 completion_tokens）、currency。
+See design doc §3.4-supplement (N-M2 completion + M-NEW-1/M-NEW-2 field alignment).
+Field names align with the store.py SQL schema: output_tokens (not completion_tokens), currency.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 @dataclass
 class UsageResult:
-    """从上游响应解析出的 token 用量。"""
+    """Token usage parsed from the upstream response."""
 
     input_tokens: int = 0
     completion_tokens: int = 0
@@ -20,7 +20,7 @@ class UsageResult:
 
     @staticmethod
     def from_dict(d: dict) -> "UsageResult":
-        """从 OpenAI 格式响应体提取 usage。"""
+        """Extract usage from an OpenAI-format response body."""
         usage = d.get("usage", {}) if isinstance(d, dict) else {}
         if not usage:
             return UsageResult.empty()
@@ -38,7 +38,7 @@ class UsageResult:
 
 @dataclass
 class CostBreakdown:
-    """成本分解：charged（实收）/ official（官方原价）/ saved（节省）。"""
+    """Cost breakdown: charged (actually paid) / official (official price) / saved (savings)."""
 
     charged: float = 0.0
     official: float = 0.0
@@ -51,9 +51,9 @@ class CostBreakdown:
 
 @dataclass
 class UsageRecord:
-    """写入 SQLite 的完整记录（字段名与 schema 对齐）。"""
+    """Complete record written to SQLite (field names align with the schema)."""
 
-    timestamp: str  # ISO 格式
+    timestamp: str  # ISO format
     model: str
     mode: str  # "byok" | "platform"
     input_tokens: int
@@ -67,10 +67,10 @@ class UsageRecord:
 
 @dataclass
 class MonthlyForecast:
-    """月终花费预测结果（§3.6）。"""
+    """Month-end spend forecast result (§3.6)."""
 
-    estimated: float = 0.0        # 预测月终总花费
-    current_spend: float = 0.0    # 本月已花费
-    daily_avg: float = 0.0        # 本月日均
-    confidence: float = 0.0       # 置信度 0~1（7 天后拉满）
-    currency: str = "USD"         # 预测币种
+    estimated: float = 0.0        # predicted total month-end spend
+    current_spend: float = 0.0    # spend so far this month
+    daily_avg: float = 0.0        # daily average this month
+    confidence: float = 0.0       # confidence 0~1 (saturates after 7 days)
+    currency: str = "USD"         # forecast currency

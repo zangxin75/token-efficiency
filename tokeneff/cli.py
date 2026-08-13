@@ -1,6 +1,6 @@
-"""tokeneff CLI 入口。
+"""tokeneff CLI entry point.
 
-命令：setup（配置向导）/ start（启动代理）/ stats（电表）/ config（查看配置）。
+Commands: setup (config wizard) / start (start proxy) / stats (meter) / config (view config).
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def show_config():
     table.add_row("月度预算", f"${cfg.budget_monthly_usd}")
     table.add_row("配置文件", str(cfg_module.CONFIG_PATH))
 
-    # 已配置的 key（不显示明文）
+    # Configured keys (plaintext not shown)
     from .proxy.model_registry import PROVIDER_REGISTRY
     configured = [p for p in PROVIDER_REGISTRY if cfg_module.get_api_key(p)]
     table.add_row("已配 key 的 provider", ", ".join(configured) or "(无)")

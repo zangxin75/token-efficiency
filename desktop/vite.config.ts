@@ -16,7 +16,7 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    // Windows 上 host:false 只绑 IPv6 [::1]，WebView2 走 IPv4 连不上 → 强制 127.0.0.1
+    // On Windows host:false binds only IPv6 [::1], WebView2 connects via IPv4 and fails → force 127.0.0.1
     host: host || "127.0.0.1",
     hmr: host
       ? {

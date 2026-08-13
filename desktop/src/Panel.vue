@@ -16,7 +16,7 @@ const summary = ref<MeterSummary | null>(null);
 const models = ref<ModelBreakdown[]>([]);
 const connected = ref(false);
 const lastUpdate = ref("");
-// B3.1：仅 platform 模式显示"累计节省"（BYOK saved 恒 0，显示会误导）
+// B3.1: only show "cumulative savings" in platform mode (BYOK saved is always 0; showing it would mislead)
 const mode = ref("byok");
 
 let timer: number | undefined;
@@ -40,7 +40,7 @@ async function refresh() {
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
-  // 拉一次 mode（低频，不随 summary 轮询）
+  // Fetch mode once (low-frequency, not polled with summary)
   fetchConfig()
     .then((c) => (mode.value = c.mode))
     .catch(() => {});
@@ -53,7 +53,7 @@ async function hidePanel() {
   await getCurrentWindow().hide();
 }
 
-/** 打开设置/onboarding 窗口 */
+/** Open the settings/onboarding window */
 async function openSettings() {
   const settings = await WebviewWindow.getByLabel("settings");
   if (settings) {
@@ -62,13 +62,13 @@ async function openSettings() {
   }
 }
 
-/** 置信度 0~1 → 百分比文字 */
+/** Confidence 0~1 → percentage text */
 function confidenceText(c: number | undefined): string {
   if (c === undefined || !Number.isFinite(c)) return "—";
   return `${Math.round(c * 100)}%`;
 }
 
-/** 模型行最大花费，用于条形图宽度 */
+/** Max spend across model rows, used for bar width */
 const maxCharged = computed(() => {
   const m = Math.max(...models.value.map((x) => x.charged), 0);
   return m > 0 ? m : 1;

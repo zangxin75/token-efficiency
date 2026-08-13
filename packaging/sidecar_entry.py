@@ -1,7 +1,7 @@
-"""tokeneff sidecar 入口点（PyInstaller 打包用）。
+"""tokeneff sidecar entry point (for PyInstaller packaging).
 
-此文件是 PyInstaller 的入口，main() 被编译成单文件可执行。
-业务逻辑在 tokeneff.api.local_server。
+This file is the PyInstaller entry point; main() is compiled into a single-file executable.
+Business logic lives in tokeneff.api.local_server.
 """
 
 import sys
@@ -10,11 +10,11 @@ import sys
 def main():
     from tokeneff.api.local_server import run_sidecar
 
-    # 允许外部指定端口（供 Tauri 调用）
+    # Allow external port specification (called by Tauri)
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="127.0.0.1", help="绑定地址")
-    parser.add_argument("--port", type=int, default=7861, help="API 端口")
+    parser.add_argument("--host", default="127.0.0.1", help="bind address")
+    parser.add_argument("--port", type=int, default=7861, help="API port")
     args = parser.parse_args()
 
     run_sidecar(host=args.host, preferred_port=args.port)

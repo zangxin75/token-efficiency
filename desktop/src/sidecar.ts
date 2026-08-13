@@ -1,6 +1,6 @@
 import axios from "axios";
 
-/** sidecar 只读 API 基址（B0 已验证 7861 端口可监听、keyring 可存取） */
+/** sidecar read-only API base (B0 verified port 7861 listenable, keyring accessible) */
 export const SIDECAR_BASE = "http://127.0.0.1:7861";
 
 export const sidecar = axios.create({
@@ -8,7 +8,7 @@ export const sidecar = axios.create({
   timeout: 3000,
 });
 
-/** /api/meter/summary 返回结构（字段对齐 tokeneff/api/local_server.py） */
+/** /api/meter/summary response structure (fields aligned with tokeneff/api/local_server.py) */
 export interface MeterSummary {
   currency: string;
   today: number;
@@ -25,7 +25,7 @@ export interface MeterSummary {
   };
 }
 
-/** /api/meter/models 返回的单条模型分布 */
+/** A single model distribution entry returned by /api/meter/models */
 export interface ModelBreakdown {
   model: string;
   charged: number;
@@ -62,9 +62,9 @@ export async function fetchHealth(): Promise<HealthInfo> {
   return data;
 }
 
-// ── B3: provider / key / config 端点 ─────────────────────────────────────────
+// ── B3: provider / key / config endpoints ─────────────────────────────────────────
 
-/** /api/providers 单条结构（对齐 local_server.py list_providers） */
+/** /api/providers single entry structure (aligned with local_server.py list_providers) */
 export interface ProviderInfo {
   name: string;
   label: string;
@@ -73,7 +73,7 @@ export interface ProviderInfo {
   configured: boolean;
 }
 
-/** /api/config 返回结构 */
+/** /api/config response structure */
 export interface AppConfig {
   mode: string;
   region: string;
@@ -97,7 +97,7 @@ export interface SaveKeyResult {
   error?: string;
 }
 
-/** GET /api/providers — 可用 provider 列表（含是否已配置） */
+/** GET /api/providers — available provider list (including whether configured) */
 export async function fetchProviders(): Promise<ProviderInfo[]> {
   const { data } = await sidecar.get<{ providers: ProviderInfo[] }>(
     "/api/providers"
@@ -105,7 +105,7 @@ export async function fetchProviders(): Promise<ProviderInfo[]> {
   return data.providers ?? [];
 }
 
-/** POST /api/config/verify — 验证 key 是否有效（不存储） */
+/** POST /api/config/verify — verify whether the key is valid (not stored) */
 export async function verifyKey(
   provider: string,
   key: string
@@ -117,7 +117,7 @@ export async function verifyKey(
   return data;
 }
 
-/** POST /api/config/key — 存储 provider key 到 keyring */
+/** POST /api/config/key — store provider key into keyring */
 export async function saveKey(
   provider: string,
   key: string
@@ -129,7 +129,7 @@ export async function saveKey(
   return data;
 }
 
-// ── B3.1: tokeneff 网关 platform key 端点 ───────────────────────────────────────
+// ── B3.1: tokeneff gateway platform key endpoints ───────────────────────────────────────
 
 export interface PlatformKeyResult {
   ok: boolean;
@@ -137,7 +137,7 @@ export interface PlatformKeyResult {
   error?: string;
 }
 
-/** POST /api/config/platform-verify — 验证 tokeneff 网关 key（向网关探测） */
+/** POST /api/config/platform-verify — verify the tokeneff gateway key (probes the gateway) */
 export async function verifyPlatformKey(
   key: string,
   platformUrl?: string
@@ -149,7 +149,7 @@ export async function verifyPlatformKey(
   return data;
 }
 
-/** POST /api/config/platform-key — 存储网关 platform key 到 keyring */
+/** POST /api/config/platform-key — store the gateway platform key into keyring */
 export async function savePlatformKey(key: string): Promise<PlatformKeyResult> {
   const { data } = await sidecar.post<PlatformKeyResult>(
     "/api/config/platform-key",
@@ -158,13 +158,13 @@ export async function savePlatformKey(key: string): Promise<PlatformKeyResult> {
   return data;
 }
 
-/** GET /api/config — 读取当前配置 */
+/** GET /api/config — read the current config */
 export async function fetchConfig(): Promise<AppConfig> {
   const { data } = await sidecar.get<AppConfig>("/api/config");
   return data;
 }
 
-/** POST /api/config — 更新非敏感配置字段 */
+/** POST /api/config — update non-sensitive config fields */
 export async function updateConfig(
   patch: Partial<AppConfig>
 ): Promise<{ updated: Record<string, unknown> }> {
@@ -175,15 +175,15 @@ export async function updateConfig(
   return data;
 }
 
-/** 货币符号 */
+/** Currency symbol */
 export function currencySymbol(currency: string): string {
   return currency === "CNY" ? "¥" : "$";
 }
 
-/** 紧凑数字格式化：0.0284 → "0.0284"，0 → "0.0000" */
+/** Compact number formatting: 0.0284 → "0.0284", 0 → "0.0000" */
 export function fmt(n: number, digits = 4): string {
   if (!Number.isFinite(n)) return "—";
-  // 小额消费（< 1 分）显示更高精度，否则 $0.000027 会被舍入成 $0.0000 看不出计费
+  // Small spend (< 1 cent) shows higher precision, otherwise $0.000027 rounds to $0.0000 hiding the billing
   if (n > 0 && n < 0.01) return n.toFixed(6);
   return n.toFixed(digits);
 }

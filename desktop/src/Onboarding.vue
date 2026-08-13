@@ -15,14 +15,14 @@ const selProvider = ref("");
 const apiKey = ref("");
 const loadErr = ref("");
 
-// 验证状态
+// Verify state
 const verifyState = ref<"idle" | "verifying" | "ok" | "fail">("idle");
 const verifyMsg = ref("");
 
-// 复制提示
+// Copy hint
 const copied = ref(false);
 
-// 测试请求状态（转化闭环）
+// Test request state (conversion closed-loop)
 const testState = ref<"idle" | "sending" | "ok" | "fail">("idle");
 const testMsg = ref("");
 
@@ -38,7 +38,7 @@ onMounted(async () => {
   }
 });
 
-// ── Step 2: 验证 key ────────────────────────────────────────────────────────
+// ── Step 2: verify key ────────────────────────────────────────────────────────
 async function doVerify() {
   if (!selProvider.value || !apiKey.value) return;
   verifyState.value = "verifying";
@@ -46,7 +46,7 @@ async function doVerify() {
   try {
     const r = await verifyKey(selProvider.value, apiKey.value);
     if (r.ok) {
-      // 验证通过 → 存储 → 进 Step 3
+      // Verify passed → store → go to Step 3
       const s = await saveKey(selProvider.value, apiKey.value);
       if (s.ok) {
         verifyState.value = "ok";
@@ -66,18 +66,18 @@ async function doVerify() {
   }
 }
 
-// ── Step 3: 复制代理地址 ────────────────────────────────────────────────────
+// ── Step 3: copy proxy address ────────────────────────────────────────────────────
 async function copyProxy() {
   try {
     await navigator.clipboard.writeText("http://127.0.0.1:7860");
     copied.value = true;
     setTimeout(() => (copied.value = false), 1500);
   } catch {
-    /* clipboard 在非安全上下文可能失败，忽略 */
+    /* clipboard may fail in non-secure contexts, ignore */
   }
 }
 
-// ── Step 4: 测试请求（转化闭环验证）──────────────────────────────────────────
+// ── Step 4: test request (conversion closed-loop validation) ──────────────────────────────────────────
 async function sendTestRequest() {
   const model = selectedInfo.value?.models?.[0];
   if (!model) {
@@ -88,7 +88,7 @@ async function sendTestRequest() {
   testState.value = "sending";
   testMsg.value = "";
   try {
-    // 直接打到 proxy（7860），proxy 会路由到上游、计费、返回
+    // Sent directly to the proxy (7860); the proxy routes upstream, bills, and returns
     const resp = await fetch("http://127.0.0.1:7860/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -121,7 +121,7 @@ function finish() {
 
 <template>
   <div class="onb-root">
-    <!-- 进度条 -->
+    <!-- progress bar -->
     <div class="progress">
       <div
         v-for="n in 4"
@@ -135,7 +135,7 @@ function finish() {
 
     <div v-if="loadErr" class="err-banner">连接 sidecar 失败：{{ loadErr }}</div>
 
-    <!-- Step 1: 选 Provider -->
+    <!-- Step 1: choose Provider -->
     <div v-if="step === 1" class="step">
       <h2>选择你的 AI Provider</h2>
       <p class="sub">tokeneff 会用你的 API Key 直连上游并计量花费</p>
@@ -158,7 +158,7 @@ function finish() {
       </div>
     </div>
 
-    <!-- Step 2: 贴 Key + 验证 -->
+    <!-- Step 2: paste Key + verify -->
     <div v-else-if="step === 2" class="step">
       <h2>粘贴 API Key</h2>
       <p class="sub">
@@ -194,7 +194,7 @@ function finish() {
       </p>
     </div>
 
-    <!-- Step 3: 指向代理 -->
+    <!-- Step 3: point to proxy -->
     <div v-else-if="step === 3" class="step">
       <h2>将客户端指向代理</h2>
       <p class="sub">
@@ -228,7 +228,7 @@ client.chat.completions.create(
       </div>
     </div>
 
-    <!-- Step 4: 完成 + 测试请求 -->
+    <!-- Step 4: done + test request -->
     <div v-else-if="step === 4" class="step">
       <h2>🎉 配置完成</h2>
       <p class="sub">
@@ -318,7 +318,7 @@ client.chat.completions.create(
   margin-bottom: 16px;
 }
 
-/* provider 卡片 */
+/* provider cards */
 .provider-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -353,7 +353,7 @@ client.chat.completions.create(
   margin-top: 4px;
 }
 
-/* key 输入 */
+/* key input */
 .key-input {
   width: 100%;
   background: #111827;
@@ -367,7 +367,7 @@ client.chat.completions.create(
   resize: vertical;
 }
 
-/* 代理地址 */
+/* proxy address */
 .proxy-box {
   display: flex;
   align-items: center;
@@ -384,7 +384,7 @@ client.chat.completions.create(
   font-weight: 700;
 }
 
-/* 示例代码 */
+/* sample code */
 .example {
   margin-bottom: 14px;
 }
@@ -406,7 +406,7 @@ client.chat.completions.create(
   word-break: break-all;
 }
 
-/* 测试请求 */
+/* test request */
 .test-box {
   background: #111827;
   border: 1px solid #374151;
@@ -415,7 +415,7 @@ client.chat.completions.create(
   margin-bottom: 16px;
 }
 
-/* 按钮 */
+/* buttons */
 .step-actions {
   margin-top: auto;
   padding-top: 16px;

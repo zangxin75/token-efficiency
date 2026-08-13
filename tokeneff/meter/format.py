@@ -1,28 +1,29 @@
-"""金额格式化工具。
+"""Money formatting utility.
 
-★ B3 回流修复：单次 LLM 请求常是几厘钱（如 $0.000077），
-:.4f 会截成 $0.0000 不可见。智能格式化：小额多显示位数，大额少显示。
+★ B3 regression fix: a single LLM request often costs a fraction of a cent
+(e.g. $0.000077); :.4f would truncate it to the invisible $0.0000.
+Smart formatting: show more digits for small amounts, fewer for large ones.
 """
 
 from __future__ import annotations
 
 
 def format_money(amount: float, currency: str = "USD") -> str:
-    """智能金额格式化。
+    """Smart money formatting.
 
     - 0 → "0.00"
-    - < 0.01 → 科学计数般保留 6 位有效（如 0.000077 → "0.000077"）
-    - 0.01 ~ 1 → 4 位（"0.0123"）
-    - ≥ 1 → 2 位（"3.45"）
+    - < 0.01 → keep 6 significant digits like scientific notation (e.g. 0.000077 → "0.000077")
+    - 0.01 ~ 1 → 4 digits ("0.0123")
+    - ≥ 1 → 2 digits ("3.45")
 
-    带 currency 符号前缀（CNY→¥，USD→$）。
+    Prefixed with the currency symbol (CNY→¥, USD→$).
     """
     symbol = "¥" if currency == "CNY" else "$"
     if amount == 0:
         return f"{symbol}0.00"
     abs_amt = abs(amount)
     if abs_amt < 0.01:
-        # 小额：保留 6 位小数，去掉末尾多余的 0
+        # Small amount: keep 6 decimal places, strip trailing zeros
         return f"{symbol}{amount:.6f}".rstrip("0").rstrip(".")
     if abs_amt < 1:
         return f"{symbol}{amount:.4f}"

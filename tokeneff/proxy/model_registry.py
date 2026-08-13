@@ -1,6 +1,6 @@
-"""模型注册表：provider 名 → endpoint / auth / format 映射。
+"""Model registry: provider name → endpoint / auth / format mapping.
 
-关联设计文档 §4.2（model_registry）+ N-C3 修订（auth_header）。
+See design doc §4.2 (model_registry) + N-C3 revision (auth_header).
 """
 
 from typing import TypedDict
@@ -69,8 +69,8 @@ PROVIDER_REGISTRY: dict[str, ProviderInfo] = {
         "verify_endpoint": "/kimi/coding/v1/models",
         "endpoint_path": "/kimi/coding/v1/messages",
         "format": "anthropic",  # Anthropic-compatible protocol
-        "auth_header": "x-api-key",  # ★ N-C3 修订
-        "verify_method": "post",  # ★ N3-C3 修订
+        "auth_header": "x-api-key",  # ★ N-C3 revision
+        "verify_method": "post",  # ★ N3-C3 revision
         "headers": {"anthropic-version": "2023-06-01"},
     },
     # ── Kimi Platform（api.moonshot.cn）──────────────────────────────────
@@ -106,13 +106,13 @@ PROVIDER_REGISTRY: dict[str, ProviderInfo] = {
         "verify_endpoint": "/v1/messages",
         "endpoint_path": "/v1/messages",
         "format": "anthropic",
-        "auth_header": "x-api-key",  # ★ N-C3 修订
-        "verify_method": "post",  # ★ N3-C3 修订：GET /v1/messages 会 405
+        "auth_header": "x-api-key",  # ★ N-C3 revision
+        "verify_method": "post",  # ★ N3-C3 revision: GET /v1/messages returns 405
         "headers": {"anthropic-version": "2023-06-01"},
     },
 }
 
-# ── 反向索引：model → provider（加速查找）───────────────────────────────
+# ── reverse index: model → provider (faster lookups) ───────────────────────────
 MODEL_TO_PROVIDER: dict[str, str] = {}
 for provider, info in PROVIDER_REGISTRY.items():
     for model in info.get("models", []):

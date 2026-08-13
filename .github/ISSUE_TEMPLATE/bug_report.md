@@ -1,40 +1,40 @@
 ---
-name: Bug 报告
-about: 报告一个 Bug 帮助我们改进
+name: Bug report
+about: Report a bug to help us improve
 title: "[Bug] "
 labels: bug
 assignees: ""
 ---
 
-## 描述
+## Description
 
-清晰简洁地描述这个 Bug。
+A clear and concise description of the bug.
 
-## 复现步骤
+## Steps to reproduce
 
-1. 配置 '...'
-2. 请求 '....'
-3. 查看 '....'
-4. 出现错误
+1. Configure '...'
+2. Request '....'
+3. Observe '....'
+4. Error occurs
 
-## 预期行为
+## Expected behavior
 
-清晰简洁地描述你期望发生的事情。
+A clear and concise description of what you expected to happen.
 
-## 实际行为
+## Actual behavior
 
-实际发生的情况（包括错误信息、日志片段）。
+What actually happened (include error messages and log snippets).
 
-## 截图 / 日志
+## Screenshots / Logs
 
-如果适用，添加截图或关键日志。
+If applicable, add screenshots or relevant log excerpts.
 
-## 环境信息
+## Environment
 
-- 部署方式: [Docker Compose | 裸机]
-- LLM 提供商: [MiniMax | GLM | Kimi | 其他]
-- 浏览器（前端问题）: [例如 Chrome 120, Safari 17]
+- Installation method: [pip | from source]
+- LLM provider: [OpenAI | DeepSeek | GLM | Kimi | other]
+- OS: [e.g. Ubuntu 22.04, macOS 14, Windows 11]
 
-## 补充信息
+## Additional context
 
-任何其他有助于排查问题的信息。
+Any other information that helps troubleshoot the issue.

@@ -1,23 +1,23 @@
 ---
-name: 功能建议
-about: 为这个项目提一个想法
+name: Feature request
+about: Suggest an idea for this project
 title: "[Feature] "
 labels: enhancement
 assignees: ""
 ---
 
-## 问题
+## Problem
 
-这个功能解决了什么问题？例：当 [...] 时，我总是觉得困扰。
+What problem does this feature solve? Example: I'm always frustrated when [...]
 
-## 解决方案
+## Proposed solution
 
-你希望看到怎样的解决方案？
+What solution would you like to see?
 
-## 替代方案
+## Alternatives considered
 
-你考虑过哪些替代方案或变通方法？
+What alternative solutions or workarounds have you considered?
 
-## 补充信息
+## Additional context
 
-任何其他上下文或截图。
+Any other context or screenshots.

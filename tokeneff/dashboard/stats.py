@@ -1,7 +1,7 @@
-"""电表统计展示：用 rich 表格输出花费/模型分布/省钱归因。
+"""Meter stats display: outputs spend / model breakdown / savings attribution via rich tables.
 
-MVP 用命令行表格（非 Live TUI，TUI 留待 v0.1 增强）。
-关联设计文档 §6.2、§15。
+MVP uses command-line tables (not Live TUI; TUI deferred to v0.1 enhancement).
+See design doc §6.2, §15.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ console = Console()
 
 
 def _char_bar(pct: float, width: int = 24) -> str:
-    """字符画进度条（rich.bar.Bar 不存在，§6.3 M5 修订）。"""
+    """Character progress bar (rich.bar.Bar does not exist; §6.3 M5 revision)."""
     pct = max(0.0, min(pct, 100.0))
     filled = int(width * pct / 100)
     bar = "█" * filled + "░" * (width - filled)
@@ -43,7 +43,7 @@ async def _gather_stats(store: UsageStore, currency: str) -> dict:
 
 
 def show_stats(model_filter: str | None = None) -> None:
-    """展示电表统计。"""
+    """Display meter stats."""
     cfg = cfg_module.get_config()
     currency = cfg.get_currency()
 
@@ -59,18 +59,18 @@ def show_stats(model_filter: str | None = None) -> None:
 
     stats = asyncio.run(_run())
 
-    # 标题
+    # Title
     console.print()
     console.print(f"[bold cyan]⚡ tokeneff 电表[/bold cyan]  [dim]({currency})[/dim]")
     console.print()
 
-    # 概览
+    # Overview
     overview = Table(show_header=False, box=None, padding=(0, 2))
     overview.add_row("今日花费", format_money(stats['today'], currency))
     overview.add_row("本月累计", format_money(stats['month'], currency))
     overview.add_row("近 7 天日均", format_money(stats['rate'], currency))
 
-    # ★ v0.2: 月终预测
+    # ★ v0.2: month-end forecast
     fc = stats["forecast"]
     if fc.confidence > 0.1:
         overview.add_row(
@@ -82,7 +82,7 @@ def show_stats(model_filter: str | None = None) -> None:
     console.print(overview)
     console.print()
 
-    # ★ v0.2: 预算告警（月预算 > 0 时显示进度条 + 阈值告警）
+    # ★ v0.2: budget alert (show progress bar + threshold alert when monthly budget > 0)
     budget = cfg_module.get_config().get_budget()
     if budget > 0:
         pct = stats["month"] / budget * 100
@@ -95,7 +95,7 @@ def show_stats(model_filter: str | None = None) -> None:
             )
         console.print()
 
-    # 模型分布
+    # Model breakdown
     models = stats["models"]
     if model_filter:
         models = [m for m in models if model_filter.lower() in m["model"].lower()]

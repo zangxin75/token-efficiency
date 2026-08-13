@@ -1,10 +1,10 @@
-"""电表实时 TUI（§6.3）：rich.Live 实时刷新。
+"""Real-time meter TUI (§6.3): refreshes in real time via rich.Live.
 
-四区块布局：summary(今日/本月/月终预测)、by_model(分布)、
-savings(省钱归因)、live_rate(实时速率)。
+Four-block layout: summary (today/month/month-end forecast), by_model (distribution),
+savings (savings attribution), live_rate (real-time rate).
 
-注意：store 方法是 async，设计文档示例写的是同步——本实现统一 async，
-render() 返回前先 await 收集数据快照。
+Note: store methods are async — the design-doc examples wrote them as sync. This
+implementation is uniformly async; render() awaits to collect a data snapshot before returning.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from ..meter.store import UsageStore
 
 
 class MeterDashboard:
-    """电表终端 UI，使用 rich.Live 实时刷新。"""
+    """Meter terminal UI, refreshed in real time via rich.Live."""
 
     def __init__(self, store: UsageStore):
         self.store = store
@@ -35,7 +35,7 @@ class MeterDashboard:
         self.currency = cfg_module.get_config().get_currency()
 
     async def render(self) -> Layout:
-        """渲染完整 dashboard 布局（先收集 async 数据快照）。"""
+        """Render the full dashboard layout (collects an async data snapshot first)."""
         today = await self.store.get_today_total(currency=self.currency)
         month = await self.store.get_month_total(currency=self.currency)
         breakdown = await self.store.get_model_breakdown_today()
@@ -55,7 +55,7 @@ class MeterDashboard:
         return layout
 
     def _render_summary(self, today, month, forecast, budget) -> Panel:
-        """顶部：今日/本月/月终预测。"""
+        """Top: today / month / month-end forecast."""
         table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
         table.add_column("label", style="dim", width=14)
         table.add_column("value", style="bold", width=16)
@@ -78,7 +78,7 @@ class MeterDashboard:
         return Panel(table, title="⚡ TokenEff 电表", border_style="cyan")
 
     def _render_by_model(self, breakdown) -> Panel:
-        """中部：按模型分解成本。"""
+        """Middle: cost breakdown per model."""
         table = Table(box=None, padding=(0, 1), expand=True)
         table.add_column("模型", style="cyan", width=22)
         table.add_column("花费", justify="right", width=12)
@@ -101,14 +101,14 @@ class MeterDashboard:
         return Panel(table, title="今日模型分布", border_style="blue")
 
     def _render_savings(self, saved) -> Panel:
-        """省钱归因。"""
+        """Savings attribution."""
         text = Text()
         text.append("💰 vs 官方定价累计节省  ", style="dim")
         text.append(format_money(saved, self.currency), style="bold green")
         return Panel(text, border_style="green")
 
     def _render_live_rate(self, rate) -> Panel:
-        """底部：实时速率（tokens/min）。"""
+        """Bottom: real-time rate (tokens/min)."""
         text = Text()
         if rate > 0:
             text.append("⚡ ", style="yellow")
@@ -119,7 +119,7 @@ class MeterDashboard:
         return Panel(text, border_style="dim")
 
     def _mini_bar(self, value: float, max_val: float) -> str:
-        """迷你进度条字符。"""
+        """Mini progress bar characters."""
         if max_val <= 0:
             return ""
         bars = "▁▂▃▄▅▆▇█"
@@ -127,19 +127,19 @@ class MeterDashboard:
         return bars[idx]
 
     def _char_bar(self, pct: float, width: int = 20) -> str:
-        """字符画进度条（§6.3 M5: 替代不存在的 rich.bar.Bar）。"""
+        """Character progress bar (§6.3 M5: replaces the nonexistent rich.bar.Bar)."""
         filled = min(int(pct / 100 * width), width)
         return "[green]" + "█" * filled + "[/green]" + "░" * (width - filled)
 
     def _char_bar_color(self, pct: float, width: int = 28) -> str:
-        """带颜色阈值的进度条（绿<60 黄<80 红>=80）。"""
+        """Progress bar with color thresholds (green<60, yellow<80, red>=80)."""
         pct = max(0.0, min(pct, 100.0))
         filled = min(int(pct / 100 * width), width)
         color = "green" if pct < 60 else ("yellow" if pct < 80 else "red")
         return f"[{color}]" + "█" * filled + f"[/{color}]" + "░" * (width - filled) + f" {pct:.0f}%"
 
     async def run(self):
-        """启动实时刷新循环。"""
+        """Start the real-time refresh loop."""
         await self.store.init()
         try:
             with Live(await self.render(), refresh_per_second=2, screen=True) as live:
@@ -152,7 +152,7 @@ class MeterDashboard:
 
 
 def run_dashboard() -> None:
-    """CLI 入口：启动实时电表。"""
+    """CLI entry point: start the real-time meter."""
     store = UsageStore()
     dash = MeterDashboard(store)
     try:

@@ -6,10 +6,10 @@ import Settings from "./Settings.vue";
 import "./styles.css";
 
 /**
- * Tauri 多窗口共享同一前端入口：根据当前窗口 label 决定挂载哪个组件。
- * - label "ball"     → 悬浮球 App.vue
- * - label "panel"    → 展开面板 Panel.vue
- * - label "settings" → 设置/Onboarding Settings.vue（内部按是否首次启动切换）
+ * Tauri multi-window shares a single frontend entry: the mounted component is decided by the current window label.
+ * - label "ball"     → floating ball App.vue
+ * - label "panel"    → expanded panel Panel.vue
+ * - label "settings" → settings/Onboarding Settings.vue (internally switches based on whether it's first launch)
  */
 async function bootstrap() {
   const root = document.getElementById("app");
@@ -17,7 +17,7 @@ async function bootstrap() {
 
   let label = "ball";
   try {
-    // 浏览器环境（Playwright 调试）无 __TAURI_INTERNALS__，降级为 ball
+    // Browser environment (Playwright debugging) has no __TAURI_INTERNALS__, fall back to ball
     label = getCurrentWindow().label;
   } catch {
     label = "ball";
