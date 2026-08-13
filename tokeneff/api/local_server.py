@@ -37,12 +37,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="tokeneff Sidecar API", version="0.1.0", lifespan=lifespan)
 
-# 仅允许本机回环来源（前端是同机 WebView），收紧 CORS
-# ★ dev 模式 webview origin 带 vite 端口（如 http://127.0.0.1:1420），生产为 tauri://localhost
-# 用正则一次覆盖回环任意端口，避免 dev/prod 分别配置
+# 用正则覆盖任意回环端口 + tauri scheme（仅本机来源，收紧）
+# ★ B2 回流修复（Windows 联调踩坑）：Tauri dev server 的 origin 带动态端口
+# （如 http://127.0.0.1:1420），固定白名单 allow_origins 无法覆盖，改用正则。
+# 教训："日志显示 200"不等于"前端拿到数据"——无 CORS 头的响应会被 webview 丢弃。
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^tauri://localhost$",
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^tauri://",
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -143,6 +144,26 @@ async def get_config():
     }
 
 
+@app.get("/api/providers")
+async def list_providers():
+    """可用 provider 列表（★ B3 onboarding 下拉用，避免前端硬编码）。
+
+    从 PROVIDER_REGISTRY 动态生成，标记哪些已配置（keyring 有 key）。
+    """
+    from ..proxy.model_registry import PROVIDER_REGISTRY
+
+    result = []
+    for name, info in PROVIDER_REGISTRY.items():
+        result.append({
+            "name": name,
+            "label": info.get("label", name),
+            "models": info.get("models", [])[:5],  # 展示前 5 个默认模型
+            "auth_header": info.get("auth_header", "authorization"),
+            "configured": cfg_module.get_api_key(name) is not None,
+        })
+    return {"providers": result}
+
+
 @app.post("/api/config")
 async def update_config(payload: dict):
     """更新非敏感配置（mode/region/budget/proxy_port/alert_threshold）。
@@ -176,6 +197,29 @@ async def set_provider_key(payload: dict):
     # 读回验证（★ H1: keyring 打包失效时会在这里暴露）
     stored = cfg_module.get_api_key(provider)
     return {"ok": stored == key, "provider": provider}
+
+
+@app.post("/api/config/verify")
+async def verify_provider_key(payload: dict):
+    """验证 API key 是否有效（★ B3 onboarding 用：配 key 前先验证）。
+
+    payload: {"provider": "glm", "key": "sk-..."}
+    复用 byok_router.verify_key（按 provider 的 auth_header + GET/POST 探测上游）。
+
+    Returns:
+        {"ok": bool, "message": str}  ok=true 表示 key 有效
+    """
+    from ..proxy.byok_router import verify_key
+
+    provider = payload.get("provider")
+    key = payload.get("key")
+    if not provider or not key:
+        return {"ok": False, "message": "provider 和 key 必填"}
+    try:
+        valid, message = await verify_key(provider, key)
+        return {"ok": valid, "message": message}
+    except Exception as e:
+        return {"ok": False, "message": f"验证请求失败: {e}"}
 
 
 # ── 启动入口 ───────────────────────────────────────────────────────────────────
