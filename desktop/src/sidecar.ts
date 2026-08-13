@@ -83,6 +83,7 @@ export interface AppConfig {
   alert_threshold: number;
   providers_configured: string[];
   has_platform_key: boolean;
+  platform_url?: string;
 }
 
 export interface VerifyResult {
@@ -125,6 +126,35 @@ export async function saveKey(
     provider,
     key,
   });
+  return data;
+}
+
+// ── B3.1: tokeneff 网关 platform key 端点 ───────────────────────────────────────
+
+export interface PlatformKeyResult {
+  ok: boolean;
+  has_platform_key?: boolean;
+  error?: string;
+}
+
+/** POST /api/config/platform-verify — 验证 tokeneff 网关 key（向网关探测） */
+export async function verifyPlatformKey(
+  key: string,
+  platformUrl?: string
+): Promise<VerifyResult> {
+  const { data } = await sidecar.post<VerifyResult>(
+    "/api/config/platform-verify",
+    { key, platform_url: platformUrl }
+  );
+  return data;
+}
+
+/** POST /api/config/platform-key — 存储网关 platform key 到 keyring */
+export async function savePlatformKey(key: string): Promise<PlatformKeyResult> {
+  const { data } = await sidecar.post<PlatformKeyResult>(
+    "/api/config/platform-key",
+    { key }
+  );
   return data;
 }
 

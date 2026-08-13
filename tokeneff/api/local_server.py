@@ -169,6 +169,7 @@ async def get_config():
         "alert_threshold": cfg.alert_threshold,
         "providers_configured": providers,
         "has_platform_key": cfg_module.get_platform_key() is not None,
+        "platform_url": cfg.platform_url,
     }
 
 
@@ -248,6 +249,56 @@ async def verify_provider_key(payload: dict):
         return {"ok": valid, "message": message}
     except Exception as e:
         return {"ok": False, "message": f"验证请求失败: {e}"}
+
+
+@app.post("/api/config/platform-verify")
+async def verify_platform_key(payload: dict):
+    """验证 tokeneff 网关 platform key（★ B3.1）。
+
+    payload: {"key": "...", "platform_url": "https://tokeneff.com"}  # platform_url 可选
+    向网关 GET /v1/models 探测，key 无效返回 401。
+
+    Returns:
+        {"ok": bool, "message": str}
+    """
+    import httpx
+
+    key = payload.get("key")
+    if not key:
+        return {"ok": False, "message": "key 必填"}
+    cfg = cfg_module.get_config()
+    # 允许请求体临时指定 url（验证未保存的网关地址），否则用已配置/默认
+    base = (payload.get("platform_url") or cfg.get_platform_url()).rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{base}/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+        if resp.status_code == 200:
+            return {"ok": True, "message": "网关 key 有效"}
+        if resp.status_code in (401, 403):
+            return {"ok": False, "message": f"网关拒绝（{resp.status_code}），key 无效或已过期"}
+        return {"ok": False, "message": f"网关返回 {resp.status_code}"}
+    except httpx.ConnectError:
+        return {"ok": False, "message": f"无法连接网关 {base}（网络或地址错误）"}
+    except Exception as e:
+        return {"ok": False, "message": f"验证请求失败: {e}"}
+
+
+@app.post("/api/config/platform-key")
+async def set_platform_key(payload: dict):
+    """存 tokeneff 网关 platform key 到 keyring（★ B3.1，明文不落盘）。
+
+    payload: {"key": "..."}
+    与 BYOK /api/config/key 对称：存后读回校验。
+    """
+    key = payload.get("key")
+    if not key:
+        return {"ok": False, "error": "key 必填"}
+    cfg_module.set_platform_key(key)
+    stored = cfg_module.get_platform_key()
+    return {"ok": stored == key, "has_platform_key": stored is not None}
 
 
 # ── 启动入口 ───────────────────────────────────────────────────────────────────

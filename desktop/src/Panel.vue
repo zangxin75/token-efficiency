@@ -5,6 +5,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   fetchSummary,
   fetchModels,
+  fetchConfig,
   currencySymbol,
   fmt,
   type MeterSummary,
@@ -15,6 +16,8 @@ const summary = ref<MeterSummary | null>(null);
 const models = ref<ModelBreakdown[]>([]);
 const connected = ref(false);
 const lastUpdate = ref("");
+// B3.1：仅 platform 模式显示"累计节省"（BYOK saved 恒 0，显示会误导）
+const mode = ref("byok");
 
 let timer: number | undefined;
 
@@ -37,6 +40,10 @@ async function refresh() {
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
+  // 拉一次 mode（低频，不随 summary 轮询）
+  fetchConfig()
+    .then((c) => (mode.value = c.mode))
+    .catch(() => {});
 });
 onUnmounted(() => {
   if (timer) window.clearInterval(timer);
@@ -95,7 +102,7 @@ const maxCharged = computed(() => {
           <div class="value">{{ symbol }}{{ fmt(summary.forecast.estimated) }}</div>
           <div class="sub">{{ confidenceText(summary.forecast.confidence) }} 置信</div>
         </div>
-        <div class="cell">
+        <div class="cell" v-if="mode === 'platform'">
           <div class="label">累计节省</div>
           <div class="value saved">{{ symbol }}{{ fmt(summary.saved) }}</div>
         </div>
