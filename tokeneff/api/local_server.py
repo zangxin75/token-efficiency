@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -26,13 +27,37 @@ log = logging.getLogger("tokeneff.sidecar")
 DEFAULT_API_PORT = 7861
 
 
+async def _periodic_flush():
+    """★ M5: 定时 flush 兜底，缩崩溃丢失窗口。
+
+    store 批量缓冲满 50 条才 flush，异常崩溃会丢未落盘的缓冲。
+    此任务每 30s 强制 flush 一次，把丢失窗口从「最多 50 条」缩到「30s 内的量」。
+    WAL 模式保证已落盘数据不损坏。
+    """
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await collector.store.flush()
+        except Exception as e:
+            log.warning(f"periodic flush failed: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ★ H2: 复用全局 collector 单例；若 proxy 已 init 则幂等
     await collector.init()
-    log.info("tokeneff sidecar API ready (shared collector singleton)")
-    yield
-    await collector.close()
+    # ★ M5: 启动定时 flush，缩崩溃丢失窗口
+    flush_task = asyncio.create_task(_periodic_flush())
+    log.info("tokeneff sidecar API ready (shared collector, 30s flush guard)")
+    try:
+        yield
+    finally:
+        flush_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
+        await collector.close()
 
 
 app = FastAPI(title="tokeneff Sidecar API", version="0.1.0", lifespan=lifespan)
