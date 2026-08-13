@@ -144,6 +144,26 @@ async def get_config():
     }
 
 
+@app.get("/api/providers")
+async def list_providers():
+    """可用 provider 列表（★ B3 onboarding 下拉用，避免前端硬编码）。
+
+    从 PROVIDER_REGISTRY 动态生成，标记哪些已配置（keyring 有 key）。
+    """
+    from ..proxy.model_registry import PROVIDER_REGISTRY
+
+    result = []
+    for name, info in PROVIDER_REGISTRY.items():
+        result.append({
+            "name": name,
+            "label": info.get("label", name),
+            "models": info.get("models", [])[:5],  # 展示前 5 个默认模型
+            "auth_header": info.get("auth_header", "authorization"),
+            "configured": cfg_module.get_api_key(name) is not None,
+        })
+    return {"providers": result}
+
+
 @app.post("/api/config")
 async def update_config(payload: dict):
     """更新非敏感配置（mode/region/budget/proxy_port/alert_threshold）。
@@ -177,6 +197,29 @@ async def set_provider_key(payload: dict):
     # 读回验证（★ H1: keyring 打包失效时会在这里暴露）
     stored = cfg_module.get_api_key(provider)
     return {"ok": stored == key, "provider": provider}
+
+
+@app.post("/api/config/verify")
+async def verify_provider_key(payload: dict):
+    """验证 API key 是否有效（★ B3 onboarding 用：配 key 前先验证）。
+
+    payload: {"provider": "glm", "key": "sk-..."}
+    复用 byok_router.verify_key（按 provider 的 auth_header + GET/POST 探测上游）。
+
+    Returns:
+        {"ok": bool, "message": str}  ok=true 表示 key 有效
+    """
+    from ..proxy.byok_router import verify_key
+
+    provider = payload.get("provider")
+    key = payload.get("key")
+    if not provider or not key:
+        return {"ok": False, "message": "provider 和 key 必填"}
+    try:
+        valid, message = await verify_key(provider, key)
+        return {"ok": valid, "message": message}
+    except Exception as e:
+        return {"ok": False, "message": f"验证请求失败: {e}"}
 
 
 # ── 启动入口 ───────────────────────────────────────────────────────────────────
