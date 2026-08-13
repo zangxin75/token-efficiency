@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .. import config as cfg_module
+from ..meter.format import format_money
 from ..meter.predictor import BudgetAlert, SpendPredictor
 from ..meter.store import UsageStore
 
@@ -45,7 +46,6 @@ def show_stats(model_filter: str | None = None) -> None:
     """展示电表统计。"""
     cfg = cfg_module.get_config()
     currency = cfg.get_currency()
-    sym = "¥" if currency == "CNY" else "$"
 
     async def _run():
         store = UsageStore()
@@ -66,19 +66,19 @@ def show_stats(model_filter: str | None = None) -> None:
 
     # 概览
     overview = Table(show_header=False, box=None, padding=(0, 2))
-    overview.add_row("今日花费", f"{sym}{stats['today']:.4f}")
-    overview.add_row("本月累计", f"{sym}{stats['month']:.4f}")
-    overview.add_row("近 7 天日均", f"{sym}{stats['rate']:.4f}")
+    overview.add_row("今日花费", format_money(stats['today'], currency))
+    overview.add_row("本月累计", format_money(stats['month'], currency))
+    overview.add_row("近 7 天日均", format_money(stats['rate'], currency))
 
     # ★ v0.2: 月终预测
     fc = stats["forecast"]
     if fc.confidence > 0.1:
         overview.add_row(
             "月终预测",
-            f"~{sym}{fc.estimated:.2f} [dim]({fc.confidence:.0%} 置信)[/dim]",
+            f"~{format_money(fc.estimated, currency)} [dim]({fc.confidence:.0%} 置信)[/dim]",
         )
 
-    overview.add_row("累计节省", f"[green]{sym}{stats['saved']:.4f}[/green]")
+    overview.add_row("累计节省", f"[green]{format_money(stats['saved'], currency)}[/green]")
     console.print(overview)
     console.print()
 
@@ -87,7 +87,7 @@ def show_stats(model_filter: str | None = None) -> None:
     if budget > 0:
         pct = stats["month"] / budget * 100
         console.print(
-            f"预算进度  {sym}{stats['month']:.2f} / {sym}{budget:.2f}  " + _char_bar(pct)
+            f"预算进度  {format_money(stats['month'], currency)} / {format_money(budget, currency)}  " + _char_bar(pct)
         )
         if pct >= 80:
             console.print(
@@ -106,7 +106,7 @@ def show_stats(model_filter: str | None = None) -> None:
         table.add_column("花费", justify="right")
         table.add_column("tokens", justify="right")
         for m in models:
-            table.add_row(m["model"], f"{sym}{m['cost']:.4f}", f"{m['tokens']:,}")
+            table.add_row(m["model"], format_money(m["cost"], currency), f"{m['tokens']:,}")
         console.print(table)
     else:
         console.print("[dim]暂无今日用量数据[/dim]")

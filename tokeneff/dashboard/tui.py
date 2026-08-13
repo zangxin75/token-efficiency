@@ -20,6 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import config as cfg_module
+from ..meter.format import format_money
 from ..meter.predictor import SpendPredictor
 from ..meter.store import UsageStore
 
@@ -32,7 +33,6 @@ class MeterDashboard:
         self.predictor = SpendPredictor(store)
         self.refresh_interval = 0.5  # 500ms
         self.currency = cfg_module.get_config().get_currency()
-        self.sym = "¥" if self.currency == "CNY" else "$"
 
     async def render(self) -> Layout:
         """渲染完整 dashboard 布局（先收集 async 数据快照）。"""
@@ -62,16 +62,16 @@ class MeterDashboard:
         table.add_column("bar", width=34)
 
         max_val = max(today, month / 30, 0.0001)
-        table.add_row("今日 Today", f"{self.sym}{today:.4f}", self._mini_bar(today, max_val * 8))
+        table.add_row("今日 Today", format_money(today, self.currency), self._mini_bar(today, max_val * 8))
 
         month_pct = (month / budget * 100) if budget > 0 else 0
         bar = self._char_bar_color(month_pct, 28) if budget > 0 else ""
-        table.add_row("本月 Month", f"{self.sym}{month:.4f}", bar)
+        table.add_row("本月 Month", format_money(month, self.currency), bar)
 
         if forecast.confidence > 0.1:
             table.add_row(
                 "月终预测 Est.",
-                f"~{self.sym}{forecast.estimated:.2f}",
+                f"~{format_money(forecast.estimated, self.currency)}",
                 Text(f"{forecast.confidence:.0%} 置信", style="dim"),
             )
 
@@ -90,7 +90,7 @@ class MeterDashboard:
             pct = b["cost"] / max_cost if max_cost > 0 else 0
             table.add_row(
                 b["model"],
-                f"{self.sym}{b['cost']:.4f}",
+                format_money(b['cost'], self.currency),
                 f"{b['tokens']:,}",
                 self._char_bar(pct * 100, 18),
             )
@@ -104,7 +104,7 @@ class MeterDashboard:
         """省钱归因。"""
         text = Text()
         text.append("💰 vs 官方定价累计节省  ", style="dim")
-        text.append(f"{self.sym}{saved:.4f}", style="bold green")
+        text.append(format_money(saved, self.currency), style="bold green")
         return Panel(text, border_style="green")
 
     def _render_live_rate(self, rate) -> Panel:
@@ -112,7 +112,7 @@ class MeterDashboard:
         text = Text()
         if rate > 0:
             text.append("⚡ ", style="yellow")
-            text.append(f"{self.sym}{rate:.4f}/min", style="bold")
+            text.append(f"{format_money(rate, self.currency)}/min", style="bold")
             text.append(f"  ·  更新于 {datetime.now().strftime('%H:%M:%S')}", style="dim")
         else:
             text.append("⚪ Idle — 等待请求...", style="dim")
