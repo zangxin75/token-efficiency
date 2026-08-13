@@ -22,8 +22,8 @@ def route(model: str, body: bytes, request_headers: dict, path: str = "") -> tup
         body: 请求体（bytes）
         request_headers: 客户端原始请求头（忽略，用平台 key）
         path: 客户端请求路径（如 "v1/messages"、"v1/chat/completions"）
-              ★ Anthropic 格式客户端（Claude Code）打 /v1/messages，需透传到
-              网关同名端点；网关自己处理 OpenAI↔Anthropic 格式转换。
+              ★ 按客户端端点透传到网关同名端点，协议格式由端点决定而非 model 名
+              （别名映射可能让 Anthropic 客户端发 glm-* 模型名）。
 
     Returns:
         (url, headers) 网关地址 + 平台 key 头
@@ -57,11 +57,14 @@ def route(model: str, body: bytes, request_headers: dict, path: str = "") -> tup
     return url, headers
 
 
-def get_format(model: str) -> str:
-    """平台模式统一走 OpenAI 兼容（网关侧负责转换）。
+def get_format(model: str, client_endpoint: str = "") -> str:
+    """平台模式格式判定：★ 按客户端端点，而非 model 名。
 
-    但客户端发的可能是 Anthropic 格式（claude 模型），需按客户端格式 adapt。
+    打 /v1/messages = Anthropic 客户端（Claude Code），返回 "anthropic"；
+    否则按 model 名判定（兼容 OpenAI SDK 客户端）。
     """
+    if "messages" in client_endpoint:
+        return "anthropic"
     return get_provider_format(model)
 
 

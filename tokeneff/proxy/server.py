@@ -51,6 +51,18 @@ def _is_stream_request(body: dict) -> bool:
     return body.get("stream", False) is True
 
 
+def _is_native_anthropic(body: dict) -> bool:
+    """判断请求是否已是 Anthropic 原生格式（如 Claude Code 发的）。
+
+    信号：messages 里无 system role（Anthropic 把 system 放顶层）且带 max_tokens。
+    OpenAI SDK 客户端会把 system 作为 message 发，需 adapt；原生客户端已是目标格式，
+    adapt 反而会丢弃 tools/system 等字段，故对原生请求短路跳过。
+    """
+    messages = body.get("messages", [])
+    has_system_role = any(m.get("role") == "system" for m in messages)
+    return not has_system_role and "max_tokens" in body
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 拦截入口
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -83,39 +95,41 @@ async def intercept(request: Request, path: str):
         provider_format = byok_router.get_provider_format(model)
 
     # 3. Anthropic 格式转换（★ N3-C2，仅 BYOK 模式；platform 模式网关侧转换）
-    if provider_format == "anthropic":
+    # BYOK 模式下需保护 Anthropic 原生客户端（Claude Code），adapt 会丢弃其 tools/system。
+    if provider_format == "anthropic" and not _is_native_anthropic(body_json):
         body = byok_router.adapt_request_body(body, provider_format)
 
     is_stream = _is_stream_request(body_json)
 
     # 4. 转发到上游
     start_time = time.time()
+
+    # 5. 处理响应：非流式 vs 流式
+    if is_stream:
+        # ★ 流式：httpx client 必须存活到流消费完毕。把 client 创建、send、
+        # 逐块 yield 合并进同一生成器，让 with 在流结束后才退出，
+        # 否则 client 提前关闭导致 aiter_raw() 抛 httpx.ReadError / ECONNRESET。
+        return StreamingResponse(
+            _stream_proxy(upstream_url, body, headers, model, mode, start_time),
+            media_type="text/event-stream",
+        )
+
+    # 非流式：独立 client，全量读完后即可释放
     async with httpx.AsyncClient(timeout=300) as client:
         try:
-            upstream_req = client.build_request(
-                "POST", upstream_url, content=body, headers=headers,
-            )
-            upstream_resp = await client.send(upstream_req, stream=is_stream)
+            upstream_resp = await client.post(upstream_url, content=body, headers=headers)
         except Exception as e:
             log.error(f"upstream error: {e}")
             return Response(content=f"Upstream error: {e}", status_code=502)
 
-    # 5. 处理响应：非流式 vs 流式
-    if is_stream:
-        return StreamingResponse(
-            _stream_and_meter(upstream_resp, model, mode, start_time),
-            media_type=upstream_resp.headers.get("content-type", "application/json"),
-        )
-    else:
-        # 非流式：全量读 → 计费 → 写入
-        content = await upstream_resp.aread()
+        content = upstream_resp.content
         elapsed = time.time() - start_time
 
         if upstream_resp.status_code != 200:
             return Response(
                 content=content,
                 status_code=upstream_resp.status_code,
-                headers=dict(upstream_resp.headers),
+                headers={"content-type": upstream_resp.headers.get("content-type", "application/json")},
             )
 
         # 解析 usage，计算成本，记录
@@ -132,7 +146,7 @@ async def intercept(request: Request, path: str):
         return Response(
             content=content,
             status_code=upstream_resp.status_code,
-            headers=dict(upstream_resp.headers),
+            headers={"content-type": upstream_resp.headers.get("content-type", "application/json")},
         )
 
 
@@ -164,6 +178,23 @@ async def _stream_and_meter(upstream_resp, model: str, mode: str, start_time: fl
                     break
     except Exception as e:
         log.warning(f"stream usage parse error: {e}")
+
+
+async def _stream_proxy(upstream_url, body, headers, model, mode, start_time):
+    """★ 流式转发：在生成器内管理 httpx client 生命周期。
+
+    client.send(stream=True) 返回的响应必须在其 client 存活期间消费，
+    故 client 创建与流消费必须同处一个 async with——generator 不结束，with 不退出。
+    非流式分支因 aread() 同步完成无此约束。
+    """
+    async with httpx.AsyncClient(timeout=300) as client:
+        try:
+            async with client.stream("POST", upstream_url, content=body, headers=headers) as upstream_resp:
+                async for chunk in _stream_and_meter(upstream_resp, model, mode, start_time):
+                    yield chunk
+        except Exception as e:
+            log.error(f"stream proxy error: {e}")
+            raise
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
