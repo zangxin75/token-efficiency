@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local data（用户隐私，绝不提交）
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+
+# OS
+Thumbs.db
+
+# OMC runtime state
+.omc/
+
+# PyInstaller 中间产物（保留 build/hooks、build/*.sh、build/sidecar_entry.py）
+pyinstaller_build/
+build/bdist.*/
+build/lib/
+
+# Tauri / Node（desktop 子项目）
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/dist/
+desktop/*.log
+
+# 临时诊断/运行日志
+sidecar-src.log
+sidecar-exe.log
+sidecar*.log
+sidecar*.err
+tauri*.log
+diag-*.png
+diag-*.txt
+ball-screenshot.png
