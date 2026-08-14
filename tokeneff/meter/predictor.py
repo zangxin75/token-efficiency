@@ -105,10 +105,10 @@ class SpendPredictor:
 class BudgetAlert:
     """Budget alert checker."""
 
-    def __init__(self, threshold: float = 0.8):
+    def __init__(self, threshold: float = 80.0):
         """
         Args:
-            threshold: alert threshold (default 80%)
+            threshold: alert threshold in percent (default 80%)
         """
         self.threshold = threshold
 
@@ -122,10 +122,16 @@ class BudgetAlert:
             return None
 
         currency = get_config().get_currency()
+        # ★ review fix: budget 参数语义为 USD（与 budget_monthly_usd 存储一致），
+        # month_spend 却是区域币种（cn→CNY）——先换算再比较，否则百分比膨胀 7.2 倍
+        if currency == "CNY":
+            from ..meter.calculator import USD_TO_CNY
+            budget = budget * USD_TO_CNY
         month_spend = await store.get_month_total(currency=currency)
-        pct = month_spend / budget
+        pct = month_spend / budget if budget > 0 else 0
 
-        if pct >= self.threshold:
+        # threshold is percent (10-100); pct is 0-1 — compare in the same scale
+        if pct * 100 >= self.threshold:
             return {
                 "triggered": True,
                 "pct": pct,

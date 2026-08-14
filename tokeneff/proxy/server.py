@@ -15,6 +15,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from . import byok_router, platform_router
@@ -26,6 +27,35 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("tokeneff.server")
 
 app = FastAPI(title="tokeneff BYOK Proxy", version="0.1.0")
+
+# ★ CORS：Onboarding 第 4 步的代理连通性测试从 Tauri webview 发起（origin 为
+# https://tauri.localhost 或 dev 的 127.0.0.1:142x），非简单请求会触发 preflight；
+# 代理原本没有 CORSMiddleware，测试请求被 preflight 拦截后报"代理未启动"误导用户。
+# 与 sidecar (local_server.py) 同一套规则：生产仅 tauri 两 origin；dev（源码运行，
+# sys.frozen=False）放行 loopback。代理会附加 keyring 真实 key 转发上游，任意本地
+# 页面借用户额度发计费请求的路径必须堵死。
+import sys as _sys
+
+_TAURI_ORIGINS = r"^https?://tauri\.localhost$|^tauri://"
+_DEV_LOOPBACK = r"|^https?://(127\.0\.0\.1|localhost)(:\d+)?$"
+# 与 local_server.py 同一套双信号判定：源码运行（frozen=False）或 `tauri dev`
+# 的 debug 构建显式传 SIDECAR_DEV=1（dev 下 Tauri spawn 的仍是打包 exe，frozen
+# 探测不成立，必须靠 Rust 侧 cfg!(debug_assertions) 显式打标）
+_IS_DEV = (
+    not getattr(_sys, "frozen", False)
+    or __import__("os").environ.get("SIDECAR_DEV", "").strip().lower() in ("1", "true", "yes")
+)
+_PROXY_ORIGIN_REGEX = (
+    _TAURI_ORIGINS + _DEV_LOOPBACK
+    if _IS_DEV
+    else _TAURI_ORIGINS
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=_PROXY_ORIGIN_REGEX,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 # 挂载的子应用路径（如 /v1/）
 MOUNT_PREFIX = "/v1"
@@ -101,20 +131,29 @@ async def intercept(request: Request, path: str):
     # 2. 路由：按 mode 分支选择 BYOK（用户 key 直连上游）或平台（TokenEff 网关）
     req_headers = dict(request.headers)
     if mode == "platform":
-        # ★ 透传 path：Claude Code 打 /v1/messages，需转发到网关同名端点
-        # ★ M14 fix (audit): platform key not configured raises RuntimeError with a
-        # helpful Chinese message — surface it as 400, not a bare 500.
         try:
+            # ★ 透传 path：Claude Code 打 /v1/messages，需转发到网关同名端点
             upstream_url, headers = platform_router.route(model, body, req_headers, path)
         except RuntimeError as e:
+            # ★ review fix: platform key 未配置时对齐 byok 的 401（此前未捕获 → 500，
+            # SDK 把 500 当上游故障自动重试，且报错信息不含配置指引）
             return Response(
-                content=json.dumps({"error": str(e)}),
-                status_code=400,
-                media_type="application/json",
+                content=json.dumps({"error": {"message": str(e), "type": "auth_error"}}),
+                status_code=401,
+                headers={"content-type": "application/json"},
             )
         provider_format = "openai"  # ★ platform 模式不做本地 adapt，网关自处理格式转换
     else:
-        upstream_url, headers = byok_router.route(model, body, req_headers)
+        try:
+            upstream_url, headers = byok_router.route(model, body, req_headers)
+        except byok_router.ByokRouterError as e:
+            # ★ review fix: unknown model + no stored key — refuse rather than leak
+            # the client's credentials to a guessed upstream (401 lets SDKs surface it)
+            return Response(
+                content=json.dumps({"error": {"message": str(e), "type": "auth_error"}}),
+                status_code=401,
+                headers={"content-type": "application/json"},
+            )
         provider_format = byok_router.get_provider_format(model)
 
     # 3. Anthropic 格式转换（★ N3-C2，仅 BYOK 模式；platform 模式网关侧转换）
@@ -163,8 +202,14 @@ async def intercept(request: Request, path: str):
 
         usage = UsageResult.from_dict(payload)
         if usage.has_data:
-            await collector.record(model, usage, elapsed=elapsed)
-            log.info(f"[metered] {model}: in={usage.input_tokens} out={usage.completion_tokens}, elapsed={elapsed:.2f}s")
+            # ★ 计费失败不能破坏转发契约：上游请求已真实发生并扣费，此处抛错会让
+            # 客户端收到 500 并触发 SDK 自动重试 → 上游双重计费而本地一条都没记上。
+            # 流式路径同样有此保护（_stream_and_meter 内）。
+            try:
+                await collector.record(model, usage, elapsed=elapsed)
+                log.info(f"[metered] {model}: in={usage.input_tokens} out={usage.completion_tokens}, elapsed={elapsed:.2f}s")
+            except Exception as e:
+                log.error(f"meter record failed (upstream response still returned): {e}")
 
         return Response(
             content=content,

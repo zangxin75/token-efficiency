@@ -20,8 +20,12 @@ class UsageResult:
 
     @staticmethod
     def from_dict(d: dict) -> "UsageResult":
-        """Extract usage from an OpenAI-format response body."""
-        usage = d.get("usage", {}) if isinstance(d, dict) else {}
+        """Extract usage from an OpenAI- or Anthropic-format response body."""
+        usage = {}
+        if isinstance(d, dict):
+            # OpenAI 格式: usage 在顶层; Anthropic 格式: message_start 事件的
+            # usage 嵌套在 message 里（{"type":"message_start","message":{"usage":{...}}}）
+            usage = d.get("usage") or d.get("message", {}).get("usage") or {}
         if not usage:
             return UsageResult.empty()
         return UsageResult(

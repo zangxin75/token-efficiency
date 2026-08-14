@@ -17,6 +17,8 @@ export interface MeterSummary {
   saved: number;
   budget: number;
   budget_pct: number | null;
+  /** user-configured alert threshold in percent (drives ball/panel coloring) */
+  alert_threshold: number;
   forecast: {
     estimated: number;
     current_spend: number;
@@ -25,11 +27,12 @@ export interface MeterSummary {
   };
 }
 
-/** A single model distribution entry returned by /api/meter/models */
+/** A single model distribution entry returned by /api/meter/models
+ * (fields must match store.get_model_breakdown_today — a mismatch renders NaN
+ * across the whole model-distribution section, see review fix) */
 export interface ModelBreakdown {
   model: string;
   charged: number;
-  saved: number;
   input_tokens: number;
   output_tokens: number;
 }
@@ -77,6 +80,8 @@ export interface ProviderInfo {
 export interface AppConfig {
   mode: string;
   region: string;
+  /** manual-override lock: true = auto-detect must not rewrite region */
+  region_manual: boolean;
   currency: string;
   proxy_port: number;
   budget_monthly_usd: number;
@@ -110,10 +115,14 @@ export async function verifyKey(
   provider: string,
   key: string
 ): Promise<VerifyResult> {
-  const { data } = await sidecar.post<VerifyResult>("/api/config/verify", {
-    provider,
-    key,
-  });
+  // per-request timeout: backend probes with a 15s httpx budget — the frontend
+  // must stay strictly longer or an edge-case timeout surfaces as a raw
+  // AxiosError instead of the backend's friendly message
+  const { data } = await sidecar.post<VerifyResult>(
+    "/api/config/verify",
+    { provider, key },
+    { timeout: 20000 }
+  );
   return data;
 }
 
@@ -142,9 +151,12 @@ export async function verifyPlatformKey(
   key: string,
   platformUrl?: string
 ): Promise<VerifyResult> {
+  // per-request timeout: backend probes the gateway with a 10s httpx budget;
+  // the frontend must not give up earlier or valid keys read as invalid
   const { data } = await sidecar.post<VerifyResult>(
     "/api/config/platform-verify",
-    { key, platform_url: platformUrl }
+    { key, platform_url: platformUrl },
+    { timeout: 15000 }
   );
   return data;
 }
@@ -164,9 +176,32 @@ export async function fetchConfig(): Promise<AppConfig> {
   return data;
 }
 
+/** GET /api/region/detect — multi-signal region detection (★ R1, VPN-proof).
+ * Returns raw signals + scores + recommended region + human-readable reason. */
+export interface RegionSignals {
+  timezone: string;
+  locale: string;
+  ip_country: string | null;
+  win_locale: string | null;
+  cn_score: number;
+  global_score: number;
+  recommended: "cn" | "global" | null;
+  reason: string;
+}
+
+export async function detectRegion(): Promise<RegionSignals> {
+  // per-request timeout override: backend IP probing can take up to ~6s,
+  // longer than the global 3s default — a premature abort would misroute
+  // overseas users to the CN gateway
+  const { data } = await sidecar.get<RegionSignals>("/api/region/detect", {
+    timeout: 8000,
+  });
+  return data;
+}
+
 /** POST /api/config — update non-sensitive config fields */
 export async function updateConfig(
-  patch: Partial<AppConfig>
+  patch: Partial<AppConfig> & { region_manual?: boolean }
 ): Promise<{ updated: Record<string, unknown> }> {
   const { data } = await sidecar.post<{ updated: Record<string, unknown> }>(
     "/api/config",

@@ -18,7 +18,7 @@ async def test_record_and_flush(tmp_db, sample_records):
 
 @pytest.mark.asyncio
 async def test_model_breakdown(tmp_db, sample_records):
-    """模型分布聚合。"""
+    """模型分布聚合（字段契约与前端 ModelBreakdown 对齐：charged/input_tokens/output_tokens）。"""
     for rec in sample_records:
         await tmp_db.record(rec)
     await tmp_db.flush()
@@ -26,7 +26,9 @@ async def test_model_breakdown(tmp_db, sample_records):
     models = {b["model"]: b for b in breakdown}
     assert "deepseek-v4-flash" in models
     assert "gpt-4o" in models
-    assert models["deepseek-v4-flash"]["cost"] == pytest.approx(0.003, abs=1e-6)
+    assert models["deepseek-v4-flash"]["charged"] == pytest.approx(0.003, abs=1e-6)
+    assert models["deepseek-v4-flash"]["input_tokens"] > 0
+    assert models["deepseek-v4-flash"]["output_tokens"] > 0
 
 
 @pytest.mark.asyncio

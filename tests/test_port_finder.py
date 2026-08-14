@@ -8,9 +8,10 @@ from tokeneff.port_finder import find_free_port, is_port_free
 
 
 def _occupy(port: int) -> socket.socket:
-    """占用一个端口，返回 socket（调用方负责 close）。"""
+    """占用一个端口，返回 socket（调用方负责 close）。
+    ★ 不设 SO_REUSEADDR：Windows 上它允许 bind 到他人正在监听的端口，
+    会让 is_port_free 误报"空闲"（探测函数已同步去掉该选项）。"""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind(("127.0.0.1", port))
     s.listen(1)
     return s

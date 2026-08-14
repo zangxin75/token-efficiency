@@ -83,3 +83,8 @@ tauri*.log
 diag-*.png
 diag-*.txt
 ball-screenshot.png
+
+# Secrets / key material — never commit (defense against accidental git add .)
+*.tmp
+*key*backup*
+tokeneff-sidecar-*.spec

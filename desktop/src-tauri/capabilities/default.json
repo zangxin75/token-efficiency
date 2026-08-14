@@ -15,15 +15,20 @@
     "core:window:allow-outer-position",
     "core:webview:default",
     "core:event:default",
-    "opener:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
     {
-      "identifier": "shell:allow-execute",
+      "identifier": "opener:allow-open-url",
       "allow": [
-        {
-          "name": "binaries/tokeneff-sidecar",
-          "sidecar": true,
-          "args": true
-        }
+        { "url": "https://tokeneff.com/*" },
+        { "url": "https://global.tokeneff.com/*" },
+        { "url": "https://open.bigmodel.cn/*" },
+        { "url": "https://platform.openai.com/*" },
+        { "url": "https://platform.deepseek.com/*" },
+        { "url": "https://platform.kimi.com/*" },
+        { "url": "https://platform.minimaxi.com/*" },
+        { "url": "https://console.anthropic.com/*" }
       ]
     }
   ]

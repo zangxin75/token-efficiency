@@ -13,10 +13,12 @@ import {
   type MeterSummary,
 } from "./sidecar";
 import { detectForm } from "./platform";
+import { initLang, useT } from "./i18n";
 
 const today = ref(0);
 const rate = ref(0);
 const budgetPct = ref<number | null>(null);
+const threshold = ref(80);
 const currency = ref("USD");
 const connected = ref(false);
 
@@ -31,12 +33,15 @@ let onboardingChecked = false;
 
 const symbol = computed(() => currencySymbol(currency.value));
 
-/** Color logic: no budget set (null) or <60 → green; 60-80 → yellow; ≥80 → red; offline → gray */
+const t = useT();
+
+/** Color logic follows the user's alert threshold (Settings): yellow from 3/4 of
+ * the threshold, red at/above it; no budget set or below → green; offline → gray */
 function ballColor(): string {
   if (!connected.value) return "#9ca3af";
   if (budgetPct.value === null) return "#22c55e";
-  if (budgetPct.value >= 80) return "#ef4444";
-  if (budgetPct.value >= 60) return "#eab308";
+  if (budgetPct.value >= threshold.value) return "#ef4444";
+  if (budgetPct.value >= threshold.value * 0.75) return "#eab308";
   return "#22c55e";
 }
 
@@ -46,6 +51,7 @@ async function refresh() {
     today.value = d.today;
     rate.value = d.rate_per_min;
     budgetPct.value = d.budget_pct;
+    threshold.value = d.alert_threshold || 80;
     currency.value = d.currency;
     connected.value = true;
   } catch {
@@ -57,11 +63,14 @@ async function refresh() {
 // the floating ball should theoretically be hidden in favor of the tray, but the primary scenario here is ball — this is recorded for a future Linux branch.
 const form = ref<"ball" | "tray">("ball");
 // B4: sidecar crash-watchdog event listener (Rust watchdog emits "sidecar-status")
+// "down" = transient (watchdog restarting sidecar); "given-up" = terminal (restart budget exhausted)
+const givenUp = ref(false);
 let statusUnlisten: (() => void) | undefined;
 
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
+  initLang();
   checkOnboarding();
   // Platform detection
   detectForm().then((f) => {
@@ -77,8 +86,14 @@ onMounted(() => {
       const status = event.payload;
       if (status === "down") {
         connected.value = false;
+      } else if (status === "given-up") {
+        // watchdog exhausted its restart budget — self-healing stopped;
+        // a later "up" (e.g. user restarted the app) still clears this
+        connected.value = false;
+        givenUp.value = true;
       } else if (status === "up") {
         connected.value = true;
+        givenUp.value = false;
         refresh();
       }
     })
@@ -88,13 +103,21 @@ onMounted(() => {
     .catch(() => {});
 });
 
-/** First-launch check: no configured provider → open settings window into onboarding */
+/** First-launch check: mode-aware onboarding trigger (mirrors Settings.vue logic).
+ * BYOK with no provider key, or platform with no gateway key → open settings. */
 async function checkOnboarding() {
   if (onboardingChecked) return;
   onboardingChecked = true;
   try {
     const cfg = await fetchConfig();
-    if ((cfg.providers_configured?.length ?? 0) === 0) {
+    // ★ contract fix: the old check only looked at providers_configured, so
+    // platform-mode users (gateway key, no BYOK keys) were re-onboarded every launch
+    const byokEmpty = (cfg.providers_configured?.length ?? 0) === 0;
+    const platformEmpty = !cfg.has_platform_key;
+    const needs =
+      (cfg.mode === "platform" && platformEmpty) ||
+      (cfg.mode !== "platform" && byokEmpty);
+    if (needs) {
       const settings = await WebviewWindow.getByLabel("settings");
       if (settings) {
         await settings.show();
@@ -185,7 +208,8 @@ async function togglePanel() {
     @click="onClick"
   >
     <div v-if="!connected" class="connecting">
-      ⚡<br /><span>连接中</span>
+      <template v-if="givenUp">⚠<br /><span>{{ t("watchdogGivenUp") }}</span></template>
+      <template v-else>⚡<br /><span>{{ t("ballConnecting") }}</span></template>
     </div>
     <template v-else>
       <div class="today">{{ symbol }}{{ fmt(today) }}</div>

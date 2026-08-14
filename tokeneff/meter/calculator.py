@@ -8,8 +8,11 @@ See design doc §3.5.
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
+
+log = logging.getLogger("tokeneff.calculator")
 
 from .types import CostBreakdown, UsageResult
 
@@ -17,6 +20,11 @@ PRICING_PATH = Path(__file__).parent.parent / "pricing" / "pricing_global.json"
 
 # Fallback pricing for unknown models ($/M tokens) to avoid missed billing
 _FALLBACK = {"input": 1.0, "output": 2.0}
+
+# USD → CNY conversion rate (display/record-level conversion; pricing_global.json
+# is USD-only). Mirrors onboarding/wizard.py's budget conversion. Update when the
+# gateway publishes a native CNY pricing table.
+USD_TO_CNY = 7.2
 
 
 @lru_cache(maxsize=1)
@@ -41,38 +49,54 @@ def get_model_pricing(model: str) -> dict | None:
     return None
 
 
-def calculate(model: str, usage: UsageResult, mode: str = "byok") -> CostBreakdown:
+def calculate(
+    model: str, usage: UsageResult, mode: str = "byok", currency: str = "USD"
+) -> CostBreakdown:
     """Compute the cost of a single request.
 
     BYOK mode: the user connects to upstream directly; charged = official price
     (what the user actually pays upstream), saved = 0.
     Platform mode: charged = our_* (our selling price), official = official price, saved > 0.
+
+    currency: pricing_global.json is USD-only; when currency="CNY" the result is
+    converted at the record level (★ review fix — previously USD numbers were
+    stored with a CNY label, inflating/mislabeling readings by ~7x).
     """
     pricing = get_model_pricing(model)
     in_m = usage.input_tokens / 1_000_000
     out_m = usage.completion_tokens / 1_000_000
 
     if pricing is None:
-        # Unknown model: use fallback price, official=charged
-        charged = in_m * _FALLBACK["input"] + out_m * _FALLBACK["output"]
-        return CostBreakdown(
-            charged=round(charged, 6), official=round(charged, 6),
-            saved=0.0, saved_pct=0.0,
-            input_tokens=usage.input_tokens, output_tokens=usage.completion_tokens, model=model,
+        # Unknown model: use fallback price, official=charged.
+        # ★ review fix: warn — fallback-priced records silently inflate the meter
+        # (users see a higher number with no way to tell why); pricing table
+        # updates are the actual fix, this makes the gap visible.
+        log.warning(
+            "no pricing entry for model '%s'; billed at fallback $%.1f/$%.1f per M tokens (estimate)",
+            model, _FALLBACK["input"], _FALLBACK["output"],
         )
-
-    official = in_m * pricing["official_input"] + out_m * pricing["official_output"]
-
-    if mode == "byok":
-        # BYOK: what the user pays upstream = official price; no markup, no savings
-        charged = official
+        charged = in_m * _FALLBACK["input"] + out_m * _FALLBACK["output"]
+        official = charged
         saved = 0.0
+        saved_pct = 0.0
     else:
-        # Platform mode: charged = our_* selling price
-        charged = in_m * pricing["input"] + out_m * pricing["output"]
-        saved = official - charged
+        official = in_m * pricing["official_input"] + out_m * pricing["official_output"]
 
-    saved_pct = round((1 - charged / official) * 100, 1) if official > 0 else 0.0
+        if mode == "byok":
+            # BYOK: what the user pays upstream = official price; no markup, no savings
+            charged = official
+            saved = 0.0
+        else:
+            # Platform mode: charged = our_* selling price
+            charged = in_m * pricing["input"] + out_m * pricing["output"]
+            saved = official - charged
+
+        saved_pct = round((1 - charged / official) * 100, 1) if official > 0 else 0.0
+
+    if currency == "CNY":
+        charged *= USD_TO_CNY
+        official *= USD_TO_CNY
+        saved *= USD_TO_CNY
 
     return CostBreakdown(
         charged=round(charged, 6),

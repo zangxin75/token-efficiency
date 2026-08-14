@@ -10,7 +10,8 @@ import json
 
 import pytest
 
-from tokeneff.meter.collector import Collector, USD_CNY_RATE
+from tokeneff.meter.calculator import USD_TO_CNY
+from tokeneff.meter.collector import Collector
 from tokeneff.meter.types import UsageRecord, UsageResult
 from tokeneff.region import _detect_ip_country, _CN_TIMEZONES
 
@@ -38,7 +39,7 @@ async def test_h1_cny_conversion_on_record(tmp_db, monkeypatch):
     rec = history[0]
     assert rec.currency == "CNY"
     usd = 1_000_000 / 1_000_000 * 0.09
-    assert rec.charged_amount == pytest.approx(usd * USD_CNY_RATE, abs=1e-4)
+    assert rec.charged_amount == pytest.approx(usd * USD_TO_CNY, abs=1e-4)
 
 
 @pytest.mark.asyncio
@@ -149,21 +150,22 @@ def test_cn_timezone_set_includes_windows_and_localized():
 # ── M7: gateway URL whitelist (anti-SSRF / anti-key-exfil) ────────────────────
 
 
-def test_m7_gateway_url_whitelist():
-    from tokeneff.api.local_server import _validate_gateway_url as v
-    # Official + subdomains + localhost pass
-    assert v("https://tokeneff.com")[0]
-    assert v("https://global.tokeneff.com")[0]
-    assert v("https://api.tokeneff.com")[0]
-    assert v("http://localhost:6001")[0]
-    assert v("http://127.0.0.1:5001")[0]
-    # Attacker domains / SSRF targets rejected
-    assert not v("https://evil.com")[0]
-    assert not v("http://evil.com")[0]
-    assert not v("http://192.168.1.1:8080")[0]
-    assert not v("ftp://tokeneff.com")[0]
-    assert not v("not-a-url")[0]
-    assert not v("")[0]
+def test_m7_gateway_url_blacklist():
+    """M7 (re-scoped): self-hosted gateways on any public https domain are a
+    supported feature; the platform_url validator rejects only loopback/private/
+    link-local hosts (SSRF & key-exfil targets). Official domains still pass."""
+    from tokeneff.api.local_server import ConfigUpdatePayload
+    from pydantic import ValidationError
+
+    for ok_url in ("https://tokeneff.com", "https://global.tokeneff.com",
+                   "https://api.tokeneff.com", "https://evil.com"):
+        assert ConfigUpdatePayload(platform_url=ok_url).platform_url == ok_url
+    for bad_url in ("http://localhost:6001", "https://127.0.0.1:5001",
+                    "http://evil.com", "https://192.168.1.1:8080",
+                    "https://169.254.169.254", "https://10.0.0.5",
+                    "https://172.16.0.1", "https://[::1]"):
+        with pytest.raises(ValidationError):
+            ConfigUpdatePayload(platform_url=bad_url)
 
 
 # ── M12: update_config validation + region cascade ────────────────────────────
@@ -180,17 +182,20 @@ async def test_m12_config_validation_and_region_cascade(monkeypatch, tmp_path):
     C._config = None
     monkeypatch.setattr(ls.cfg_module, "get_config", C.load)
 
-    # Bad values rejected, not persisted
-    r = await ls.update_config({"proxy_port": "abc", "mode": "bogus", "budget_monthly_usd": -5})
-    assert r["updated"] == {}
-    assert "proxy_port" in r["errors"] and "mode" in r["errors"] and "budget_monthly_usd" in r["errors"]
+    # Bad values rejected with 422 by the Pydantic payload, not persisted
+    from pydantic import ValidationError
 
-    # platform_url whitelist enforced
-    r = await ls.update_config({"platform_url": "https://evil.com"})
-    assert r["updated"] == {} and "platform_url" in r["errors"]
+    with pytest.raises(ValidationError):
+        ls.ConfigUpdatePayload(proxy_port="abc")
+    with pytest.raises(ValidationError):
+        ls.ConfigUpdatePayload(mode="bogus")
+    with pytest.raises(ValidationError):
+        ls.ConfigUpdatePayload(budget_monthly_usd=-5)
+    with pytest.raises(ValidationError):
+        ls.ConfigUpdatePayload(platform_url="https://192.168.1.1:8080")
 
     # region change cascades platform_url (M12 parity with wizard set_region)
-    r = await ls.update_config({"region": "cn", "platform_url": ""})
+    r = await ls.update_config(ls.ConfigUpdatePayload(region="cn", platform_url=""))
     assert r["updated"].get("region") == "cn"
     assert C.load(force=True).get_platform_url() == "https://tokeneff.com"
 

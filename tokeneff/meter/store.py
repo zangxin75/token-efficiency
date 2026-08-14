@@ -118,24 +118,40 @@ class UsageStore:
             row = await cur.fetchone()
             return row[0] if row else 0.0
 
-    async def get_model_breakdown_today(self) -> list[dict]:
-        """Today's spend breakdown per model."""
-        today = datetime.now().strftime("%Y-%m-%d")
-        async with self._db.execute(
-            """SELECT model, SUM(charged_amount) as cost, SUM(input_tokens+output_tokens) as tokens
-               FROM usage_records WHERE timestamp >= ? GROUP BY model ORDER BY cost DESC""",
-            (today,),
-        ) as cur:
-            rows = await cur.fetchall()
-            return [{"model": r[0], "cost": r[1], "tokens": r[2]} for r in rows]
+    async def get_model_breakdown_today(self, currency: str = None) -> list[dict]:
+        """Today's spend breakdown per model. Optionally filter by currency
+        (mixed CNY/USD history must not be summed together — ★ review fix).
 
-    async def get_recent_rate(self) -> float:
-        """Daily average spend over the last 7 days."""
+        Field names match the frontend ModelBreakdown interface (charged /
+        input_tokens / output_tokens) — previously returned {model,cost,tokens}
+        while the frontend asserted {charged,input_tokens,...}, rendering NaN
+        across the whole section (★ review fix).
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        sql = """SELECT model, SUM(charged_amount) as charged,
+                        SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens
+                 FROM usage_records WHERE timestamp >= ?"""
+        params: list = [today]
+        if currency:
+            sql += " AND currency = ?"
+            params.append(currency)
+        sql += " GROUP BY model ORDER BY charged DESC"
+        async with self._db.execute(sql, tuple(params)) as cur:
+            rows = await cur.fetchall()
+            return [
+                {"model": r[0], "charged": r[1], "input_tokens": r[2], "output_tokens": r[3]}
+                for r in rows
+            ]
+
+    async def get_recent_rate(self, currency: str = None) -> float:
+        """Daily average spend over the last 7 days. Optionally filter by currency."""
         week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        async with self._db.execute(
-            "SELECT COALESCE(SUM(charged_amount), 0) FROM usage_records WHERE timestamp >= ?",
-            (week_ago,),
-        ) as cur:
+        sql = "SELECT COALESCE(SUM(charged_amount), 0) FROM usage_records WHERE timestamp >= ?"
+        params: list = [week_ago]
+        if currency:
+            sql += " AND currency = ?"
+            params.append(currency)
+        async with self._db.execute(sql, tuple(params)) as cur:
             row = await cur.fetchone()
             return (row[0] / 7) if row and row[0] else 0.0
 
@@ -159,11 +175,14 @@ class UsageStore:
                 for r in rows
             ]
 
-    async def get_total_saved(self) -> float:
-        """Cumulative savings (official - charged)."""
-        async with self._db.execute(
-            "SELECT COALESCE(SUM(saved_amount), 0) FROM usage_records",
-        ) as cur:
+    async def get_total_saved(self, currency: str = None) -> float:
+        """Cumulative savings (official - charged). Optionally filter by currency."""
+        sql = "SELECT COALESCE(SUM(saved_amount), 0) FROM usage_records"
+        params: tuple = ()
+        if currency:
+            sql += " WHERE currency = ?"
+            params = (currency,)
+        async with self._db.execute(sql, params) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0.0
 

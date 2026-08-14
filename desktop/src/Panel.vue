@@ -11,6 +11,7 @@ import {
   type MeterSummary,
   type ModelBreakdown,
 } from "./sidecar";
+import { initLang, useT } from "./i18n";
 
 const summary = ref<MeterSummary | null>(null);
 const models = ref<ModelBreakdown[]>([]);
@@ -20,6 +21,8 @@ const lastUpdate = ref("");
 const mode = ref("byok");
 
 let timer: number | undefined;
+
+const t = useT();
 
 const symbol = computed(() =>
   currencySymbol(summary.value?.currency ?? "USD")
@@ -31,7 +34,7 @@ async function refresh() {
     summary.value = s;
     models.value = m;
     connected.value = true;
-    lastUpdate.value = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    lastUpdate.value = new Date().toLocaleTimeString("en-GB", { hour12: false });
   } catch {
     connected.value = false;
   }
@@ -40,10 +43,17 @@ async function refresh() {
 onMounted(() => {
   refresh();
   timer = window.setInterval(refresh, 1000);
-  // Fetch mode once (low-frequency, not polled with summary)
+  // Region (drives language) + mode: both low-frequency, fetched once
+  initLang();
   fetchConfig()
     .then((c) => (mode.value = c.mode))
     .catch(() => {});
+  // dev 自愈：HMR 断连后 webview 停在旧页面且 hide/show 不重载——
+  // 右键面板任意处强制重载（仅调试需要；生产页面来自打包产物不存在此问题）
+  window.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    window.location.reload();
+  });
 });
 onUnmounted(() => {
   if (timer) window.clearInterval(timer);
@@ -73,49 +83,67 @@ const maxCharged = computed(() => {
   const m = Math.max(...models.value.map((x) => x.charged), 0);
   return m > 0 ? m : 1;
 });
+
+/** Budget progress bar: shown when a budget is set; color follows the user's
+ * alert threshold (yellow at 3/4 of it, red at/above it) — same logic as the ball */
+const budgetBar = computed(() => {
+  const s = summary.value;
+  if (!s || s.budget_pct === null || !Number.isFinite(s.budget_pct)) return null;
+  const pct = Math.min(100, s.budget_pct);
+  const thr = s.alert_threshold || 80;
+  const color = s.budget_pct >= thr ? "#ef4444" : s.budget_pct >= thr * 0.75 ? "#eab308" : "#22c55e";
+  return { pct, color, label: `${s.budget_pct.toFixed(0)}%` };
+});
 </script>
 
 <template>
   <div class="panel">
     <div class="header" data-tauri-drag-region>
-      <span class="title" data-tauri-drag-region>⚡ tokeneff 电表</span>
-      <button class="close" title="收起" @click="hidePanel">×</button>
+      <span class="title" data-tauri-drag-region>{{ t("panelTitle") }}</span>
+      <button class="close" :title="t('collapse')" @click="hidePanel">×</button>
     </div>
 
     <div v-if="!connected" class="connecting">
-      <p>⚡ 连接 sidecar 中…</p>
-      <p class="hint">请确认 7861 端口的 sidecar 已运行</p>
+      <p>{{ t("connecting") }}</p>
+      <p class="hint">{{ t("connectingHint") }}</p>
     </div>
 
     <template v-else-if="summary">
       <div class="grid">
         <div class="cell">
-          <div class="label">今日</div>
+          <div class="label">{{ t("today") }}</div>
           <div class="value">{{ symbol }}{{ fmt(summary.today) }}</div>
         </div>
         <div class="cell">
-          <div class="label">本月</div>
+          <div class="label">{{ t("month") }}</div>
           <div class="value">{{ symbol }}{{ fmt(summary.month) }}</div>
+          <div v-if="budgetBar" class="budget-track">
+            <div
+              class="budget-fill"
+              :style="{ width: budgetBar.pct + '%', background: budgetBar.color }"
+            ></div>
+          </div>
+          <div v-if="budgetBar" class="sub">{{ budgetBar.label }} {{ t("budgetSuffix") }}</div>
         </div>
         <div class="cell">
-          <div class="label">月终预测</div>
+          <div class="label">{{ t("forecast") }}</div>
           <div class="value">{{ symbol }}{{ fmt(summary.forecast.estimated) }}</div>
-          <div class="sub">{{ confidenceText(summary.forecast.confidence) }} 置信</div>
+          <div class="sub">{{ confidenceText(summary.forecast.confidence) }} {{ t("confidence") }}</div>
         </div>
         <div class="cell" v-if="mode === 'platform'">
-          <div class="label">累计节省</div>
+          <div class="label">{{ t("saved") }}</div>
           <div class="value saved">{{ symbol }}{{ fmt(summary.saved) }}</div>
         </div>
       </div>
 
       <div class="rate-row">
-        <span class="rate-label">实时速率</span>
+        <span class="rate-label">{{ t("rate") }}</span>
         <span class="rate-val">{{ symbol }}{{ fmt(summary.rate_per_min) }}/min</span>
       </div>
 
       <div class="models">
-        <div class="section-title">今日模型分布</div>
-        <div v-if="models.length === 0" class="empty">暂无数据</div>
+        <div class="section-title">{{ t("modelDist") }}</div>
+        <div v-if="models.length === 0" class="empty">{{ t("noData") }}</div>
         <div v-for="m in models" :key="m.model" class="model-row">
           <div class="model-name" :title="m.model">{{ m.model }}</div>
           <div class="model-bar">
@@ -132,8 +160,8 @@ const maxCharged = computed(() => {
       </div>
 
       <div class="footer">
-        <span>更新于 {{ lastUpdate }}</span>
-        <button class="settings-btn" title="设置" @click="openSettings">⚙</button>
+        <span>{{ t("updatedAt") }} {{ lastUpdate }}</span>
+        <button class="settings-btn" :title="t('settings')" @click="openSettings">⚙</button>
       </div>
     </template>
   </div>
@@ -205,6 +233,18 @@ const maxCharged = computed(() => {
   font-size: 9px;
   color: #9ca3af;
   margin-top: 1px;
+}
+.budget-track {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 2px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.budget-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease, background 0.4s ease;
 }
 .rate-row {
   display: flex;

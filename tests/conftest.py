@@ -9,6 +9,15 @@ import pytest
 
 from tokeneff.meter.store import UsageStore
 from tokeneff.meter.types import UsageRecord
+from tokeneff.config import TokenEffConfig
+
+
+@pytest.fixture
+def tmp_config():
+    """构造不落盘的 TokenEffConfig（测试预算/币种换算用）。"""
+    def _make(**kwargs) -> TokenEffConfig:
+        return TokenEffConfig(**kwargs)
+    return _make
 
 
 @pytest.fixture

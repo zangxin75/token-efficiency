@@ -62,7 +62,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src http://127.0.0.1:7861 http://127.0.0.1:7860 http://127.0.0.1:1420; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:"
     }
   },
   "bundle": {

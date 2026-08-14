@@ -31,9 +31,9 @@ def _char_bar(pct: float, width: int = 24) -> str:
 async def _gather_stats(store: UsageStore, currency: str) -> dict:
     today = await store.get_today_total(currency=currency)
     month = await store.get_month_total(currency=currency)
-    models = await store.get_model_breakdown_today()
-    rate = await store.get_recent_rate()
-    saved = await store.get_total_saved()
+    models = await store.get_model_breakdown_today(currency=currency)
+    rate = await store.get_recent_rate(currency=currency)
+    saved = await store.get_total_saved(currency=currency)
     history = await store.get_history_30d()
     forecast = SpendPredictor().predict_monthly(history, currency)
     return {
@@ -83,15 +83,18 @@ def show_stats(model_filter: str | None = None) -> None:
     console.print()
 
     # ★ v0.2: budget alert (show progress bar + threshold alert when monthly budget > 0)
-    budget = cfg_module.get_config().get_budget_in()
+    # ★ review fix: 换算到区域币种再算百分比；阈值用配置值（此前硬编码 80，
+    # 且 USD 数值直接除 CNY 金额使百分比膨胀 7.2 倍、预算还顶着 ¥ 符号显示）
+    budget = cfg_module.get_config().get_budget_in_currency()
     if budget > 0:
         pct = stats["month"] / budget * 100
         console.print(
             f"预算进度  {format_money(stats['month'], currency)} / {format_money(budget, currency)}  " + _char_bar(pct)
         )
-        if pct >= 80:
+        threshold = cfg_module.get_config().alert_threshold
+        if pct >= threshold:
             console.print(
-                f"[bold red]⚠ 已用 {pct:.0f}%，超过 80% 告警阈值，请注意控制用量[/bold red]"
+                f"[bold red]⚠ 已用 {pct:.0f}%，超过 {threshold:.0f}% 告警阈值，请注意控制用量[/bold red]"
             )
         console.print()
 
@@ -105,8 +108,10 @@ def show_stats(model_filter: str | None = None) -> None:
         table.add_column("模型", style="cyan")
         table.add_column("花费", justify="right")
         table.add_column("tokens", justify="right")
+        # ★ review fix: breakdown 契约字段对齐（charged/input_tokens/output_tokens）
         for m in models:
-            table.add_row(m["model"], format_money(m["cost"], currency), f"{m['tokens']:,}")
+            tokens = m["input_tokens"] + m["output_tokens"]
+            table.add_row(m["model"], format_money(m["charged"], currency), f"{tokens:,}")
         console.print(table)
     else:
         console.print("[dim]暂无今日用量数据[/dim]")

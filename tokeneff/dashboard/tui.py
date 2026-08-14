@@ -38,12 +38,14 @@ class MeterDashboard:
         """Render the full dashboard layout (collects an async data snapshot first)."""
         today = await self.store.get_today_total(currency=self.currency)
         month = await self.store.get_month_total(currency=self.currency)
-        breakdown = await self.store.get_model_breakdown_today()
-        saved = await self.store.get_total_saved()
-        rate = await self.store.get_recent_rate()
+        breakdown = await self.store.get_model_breakdown_today(currency=self.currency)
+        saved = await self.store.get_total_saved(currency=self.currency)
+        rate = await self.store.get_recent_rate(currency=self.currency)
         history = await self.store.get_history_30d()
         forecast = self.predictor.predict_monthly(history, self.currency)
-        budget = cfg_module.get_config().get_budget_in()
+        # ★ review fix: month 是区域币种（cn→CNY）而 budget_monthly_usd 恒为 USD，
+        # 直接相除使百分比膨胀 7.2 倍——换算后再比较
+        budget = cfg_module.get_config().get_budget_in_currency()
 
         layout = Layout()
         layout.split_column(
@@ -85,13 +87,16 @@ class MeterDashboard:
         table.add_column("tokens", justify="right", width=14)
         table.add_column("占比", width=22)
 
-        max_cost = max((b["cost"] for b in breakdown), default=1)
+        # ★ review fix: breakdown 契约字段已改为 charged/input_tokens/output_tokens，
+        # 旧的 b["cost"]/b["tokens"] 下标在运行时才 KeyError（打开 TUI 即崩）
+        max_cost = max((b["charged"] for b in breakdown), default=1)
         for b in breakdown[:8]:
-            pct = b["cost"] / max_cost if max_cost > 0 else 0
+            pct = b["charged"] / max_cost if max_cost > 0 else 0
+            tokens = b["input_tokens"] + b["output_tokens"]
             table.add_row(
                 b["model"],
-                format_money(b['cost'], self.currency),
-                f"{b['tokens']:,}",
+                format_money(b["charged"], self.currency),
+                f"{tokens:,}",
                 self._char_bar(pct * 100, 18),
             )
 

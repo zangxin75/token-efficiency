@@ -17,17 +17,16 @@ import tomlkit
 try:
     import keyring
     # Probe backend availability: without DBus/desktop environment SecretService
-    # writes raise KeyringLocked; on probe failure fall back to keyrings.alt file
-    # backend (plain local file, no desktop service required).
+    # writes raise KeyringLocked. ★ review fix: NO silent PlaintextKeyring fallback —
+    # the project promises keys never touch disk in plaintext (API docs, onboarding
+    # copy); a silent fallback writes keyring_pass.cfg in plaintext and would breach
+    # that promise exactly on the machines least likely to notice (headless/SSH).
+    # Storage simply fails there instead; set_api_key surfaces the failure.
     try:
         keyring.set_password("tokeneff-probe", "probe", "probe")
         keyring.delete_password("tokeneff-probe", "probe")
     except Exception:
-        try:
-            from keyrings.alt.file import PlaintextKeyring
-            keyring.set_keyring(PlaintextKeyring())
-        except Exception:
-            pass
+        keyring = None
 except ImportError:  # keyring may be unavailable in some headless environments
     keyring = None
 
@@ -48,8 +47,20 @@ class TokenEffConfig:
     platform_url: str = ""
     platform_key_ref: str = ""  # keyring reference name (placeholder; actual key lives in keyring)
     budget_monthly_usd: float = 0.0  # unified budget field (CN also stores USD; display layer converts to ¥)
-    alert_threshold: float = 0.8
+    alert_threshold: float = 80.0  # percent (10-100); legacy configs stored 0-1 fractions
     proxy_port: int = 7860
+    # ★ manual region override lock: once the user saved a manual region choice,
+    # silent auto-detection must NOT rewrite it — only an explicit "重新检测"
+    # applies a new detection and clears this lock. Prevents the settings page
+    # from pulling a traveler's manual choice back to the auto-detected region.
+    region_manual: bool = False
+
+    def __post_init__(self):
+        # ★ contract fix: threshold was historically a 0-1 fraction (default 0.8)
+        # while the Settings slider sends whole percents (10-100). Normalize legacy
+        # values so both 0.8 and 80 mean 80%.
+        if 0 < self.alert_threshold <= 1:
+            self.alert_threshold *= 100
 
     def get_platform_url(self) -> str:
         if self.platform_url:
@@ -65,17 +76,24 @@ class TokenEffConfig:
     def get_budget(self) -> float:
         return self.budget_monthly_usd
 
-    def get_budget_in(self, currency: str | None = None) -> float:
-        """Budget converted to the display currency (★ H1 audit fix).
+    def get_budget_in_currency(self, currency: str | None = None) -> float:
+        """预算换算到当前计费币种（CNY 时 ×USD_TO_CNY）。
 
-        budget_monthly_usd is always stored in USD (wizard converts ¥ input ÷ rate).
-        Display must match the meter's currency: CNY users see the ¥ equivalent.
+        month_total 等消费金额均按区域币种记录（cn→CNY），而 budget_monthly_usd
+        恒为 USD——直接相除会使百分比膨胀 7.2 倍（11% 真实用量即标红）。
+        与 meter_summary 的换算保持同一常量来源（calculator.USD_TO_CNY）。
+        可传 currency 显式指定（wizard/显示层用），默认当前区域币种。
         """
         cur = currency or self.get_currency()
         if cur == "CNY":
-            from .meter.collector import USD_CNY_RATE
-            return self.budget_monthly_usd * USD_CNY_RATE
+            from .meter.calculator import USD_TO_CNY
+            return self.budget_monthly_usd * USD_TO_CNY
         return self.budget_monthly_usd
+
+    # 远程审计修复引入的名字，保留为别名：origin/main 的调用方
+    # (wizard/stats/tui) 与 tests/test_audit_fixes.py 均用 get_budget_in
+    def get_budget_in(self, currency: str | None = None) -> float:
+        return self.get_budget_in_currency(currency)
 
     def set_region(self, region: str) -> None:
         """Set region and cascade platform_url + currency (★ R1 引流转化方案).
@@ -106,29 +124,33 @@ def _kr_get(account: str) -> Optional[str]:
         return None
 
 
-def _kr_set(account: str, value: str) -> None:
+def _kr_set(account: str, value: str) -> bool:
+    """Store into the system keyring. Returns False when no secure backend is
+    available — callers surface this instead of silently losing the key
+    (★ review fix: silent drop made 'key saved' a lie on headless machines)."""
     if keyring is None:
-        return
+        return False
     try:
         keyring.set_password(KEYRING_SERVICE, account, value)
+        return True
     except Exception:
-        pass  # silently degrade when no keyring backend available (dev environment)
+        return False
 
 
 def get_api_key(provider: str) -> Optional[str]:
     return _kr_get(f"byok:{provider}")
 
 
-def set_api_key(provider: str, key: str) -> None:
-    _kr_set(f"byok:{provider}", key)
+def set_api_key(provider: str, key: str) -> bool:
+    return _kr_set(f"byok:{provider}", key)
 
 
 def get_platform_key() -> Optional[str]:
     return _kr_get(KEYRING_PLATFORM)
 
 
-def set_platform_key(key: str) -> None:
-    _kr_set(KEYRING_PLATFORM, key)
+def set_platform_key(key: str) -> bool:
+    return _kr_set(KEYRING_PLATFORM, key)
 
 
 # ── config file read/write ──────────────────────────────────────────────────────

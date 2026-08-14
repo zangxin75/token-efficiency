@@ -10,10 +10,15 @@ import socket
 
 
 def is_port_free(port: int, host: str = "127.0.0.1") -> bool:
-    """Probe whether a port is available (bindable means free)."""
+    """Probe whether a port is available (bindable means free).
+
+    ★ No SO_REUSEADDR: on Windows it permits binding over a port another process
+    is actively LISTENING on, making occupied ports probe as free — the subsequent
+    uvicorn bind then fails (10048). On POSIX REUSEADDR only reclaims TIME_WAIT
+    sockets, which is irrelevant for a one-shot probe.
+    """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((host, port))
         return True
     except OSError:

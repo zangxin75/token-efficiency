@@ -13,10 +13,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
 
 from .. import config as cfg_module
 from ..meter.collector import collector  # ★ H2: shared global singleton
@@ -63,16 +65,46 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="tokeneff Sidecar API", version="0.1.0", lifespan=lifespan)
 
-# Use a regex to cover any loopback port + tauri scheme (local-only sources, tightened)
+# Use a regex to cover tauri origins (local-only sources, tightened)
 # ★ B2 regression fix (Windows integration pitfall): the Tauri dev server origin carries a dynamic port
-# (e.g. http://127.0.0.1:1420); a fixed allow_origins allowlist cannot cover it, so use a regex.
+# (e.g. http://127.0.0.1:1420); a fixed allow_origins allowlist cannot cover it.
 # Lesson: "logs show 200" does not mean "the frontend got the data" — responses without CORS headers are dropped by the webview.
 # ★ B5 regression fix (installer pitfall): Tauri 2 production-mode origin varies by webview —
 #   Windows WebView2 = https://tauri.localhost; macOS/Linux WebKit = tauri://localhost.
 #   The original ^tauri:// only matched WebKit, missing WebView2, so the installer's fetchSummary was blocked by CORS and the ball stayed grey.
+# ★ review fix: the old regex allowed ANY 127.0.0.1/localhost port as origin — any local
+#   page could POST /api/config/key and overwrite keyring keys or flip platform_url to an
+#   attacker-controlled gateway (key exfiltration). Production now accepts only the two
+#   tauri origins. Dev (vite server on http://127.0.0.1:142x) is detected via
+#   PyInstaller's frozen flag instead of an env var — the sidecar is spawned by Tauri as
+#   a child process and SIDECAR_DEV could not be injected through `tauri dev`, leaving
+#   the dev ball grey (verified: Origin http://127.0.0.1:1420 got no allow-origin header).
+import os
+import sys as _sys
+
+
+def _sys_env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+_TAURI_ORIGINS = r"^https?://tauri\.localhost$|^tauri://"
+_DEV_LOOPBACK = r"|^https?://(127\.0\.0\.1|localhost)(:\d+)?$"
+# Dev escape hatch, in priority order:
+# 1. source-run (python -m / pytest): frozen=False
+# 2. `tauri dev` spawns the PACKAGED exe (frozen=True!) but is a debug build —
+#    the Rust sidecar spawner sets SIDECAR_DEV=1 only for cfg!(debug_assertions)
+#    builds (verified tauri-plugin-shell 2.3.5 has Command::env; spawning inherits
+#    the parent env which `tauri dev` does NOT customize, so an explicit flag is
+#    required). Release/NSIS builds never set it — production CORS stays tight.
+_IS_DEV = not getattr(_sys, "frozen", False) or _sys_env_flag("SIDECAR_DEV")
+if _IS_DEV:
+    _ORIGIN_REGEX = _TAURI_ORIGINS + _DEV_LOOPBACK
+else:
+    _ORIGIN_REGEX = _TAURI_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$|^https?://tauri\.localhost$|^tauri://",
+    allow_origin_regex=_ORIGIN_REGEX,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -106,11 +138,18 @@ async def meter_summary():
 
     today = await store.get_today_total(currency=currency)
     month = await store.get_month_total(currency=currency)
-    rate = await store.get_recent_rate()
-    saved = await store.get_total_saved()
+    rate = await store.get_recent_rate(currency=currency)
+    saved = await store.get_total_saved(currency=currency)
     history = await store.get_history_30d()
     forecast = SpendPredictor(store).predict_monthly(history, currency)
-    budget = cfg.get_budget_in()
+    budget = cfg.get_budget()
+    # ★ contract fix: month is in the region currency (CNY for cn) while
+    # budget_monthly_usd is USD — dividing directly inflated the ratio ~7.2x,
+    # turning the ball red at ~11% real usage. Convert budget into the same
+    # currency before computing the percentage (ratio only, display budget stays USD).
+    from ..meter.calculator import USD_TO_CNY
+    budget_in_currency = budget * USD_TO_CNY if currency == "CNY" else budget
+    budget_pct = (month / budget_in_currency * 100) if budget_in_currency > 0 else None
 
     return {
         "currency": currency,
@@ -119,7 +158,9 @@ async def meter_summary():
         "rate_per_min": rate,
         "saved": saved,
         "budget": budget,
-        "budget_pct": (month / budget * 100) if budget > 0 else None,
+        "budget_pct": budget_pct,
+        # ★ 阈值联动 UI：前端球色/预算条跟随用户配置（不再硬编码 60/80 分界）
+        "alert_threshold": cfg.alert_threshold,
         "forecast": {
             "estimated": forecast.estimated,
             "current_spend": forecast.current_spend,
@@ -132,7 +173,10 @@ async def meter_summary():
 @app.get("/api/meter/models")
 async def meter_models():
     """Today's model breakdown."""
-    breakdown = await collector.store.get_model_breakdown_today()
+    cfg = cfg_module.get_config()
+    breakdown = await collector.store.get_model_breakdown_today(
+        currency=cfg.get_currency()
+    )
     return {"models": breakdown}
 
 
@@ -140,17 +184,22 @@ async def meter_models():
 async def meter_history(days: int = 30):
     """Historical trend (aggregated per day)."""
     days = max(1, min(days, 90))
+    currency = cfg_module.get_config().get_currency()
     history = await collector.store.get_history_30d()
-    # Aggregate per day
+    # ★ review fix: filter by the region currency before aggregating — a region
+    # switch (cn↔global) would otherwise mix CNY and USD amounts into the same
+    # daily totals, silently inflating or shrinking the trend chart ~7x
     by_day: dict[str, dict] = {}
     for r in history:
+        if r.currency != currency:
+            continue
         day = r.timestamp[:10]
         d = by_day.setdefault(day, {"date": day, "charged": 0.0, "saved": 0.0, "tokens": 0})
         d["charged"] += r.charged_amount
         d["saved"] += r.saved_amount
         d["tokens"] += r.input_tokens + r.output_tokens
     series = sorted(by_day.values(), key=lambda x: x["date"])
-    return {"days": days, "series": series}
+    return {"days": days, "currency": currency, "series": series}
 
 
 # ── config read/write ──────────────────────────────────────────────────────────
@@ -159,11 +208,17 @@ async def meter_history(days: int = 30):
 @app.get("/api/config")
 async def get_config():
     cfg = cfg_module.get_config()
-    providers = [p for p in ("openai", "deepseek", "glm", "kimi_coding", "minimax", "anthropic")
-                 if cfg_module.get_api_key(p)]
+    # ★ contract fix: iterate the live registry — the old hardcoded 6-tuple missed
+    # moonshot, so users with only a moonshot key were flagged as unconfigured and
+    # re-onboarded on every launch
+    from ..proxy.model_registry import PROVIDER_REGISTRY
+    providers = [p for p in PROVIDER_REGISTRY if cfg_module.get_api_key(p)]
     return {
         "mode": cfg.mode,
         "region": cfg.region,
+        # ★ manual-override lock: frontend auto-detect respects this and never
+        # rewrites a manually chosen region; only "重新检测" clears it
+        "region_manual": cfg.region_manual,
         "currency": cfg.get_currency(),
         "proxy_port": cfg.proxy_port,
         "budget_monthly_usd": cfg.budget_monthly_usd,
@@ -257,65 +312,110 @@ def _validate_gateway_url(url: str) -> tuple[bool, str]:
     return False, f"Non-official gateway domain: {host} (risk of platform-key exfiltration)"
 
 
+def _parse_octet(host: str, index: int) -> int:
+    """host like '172.16.x.x' → int of the octet at `index`; 0 on parse failure."""
+    try:
+        return int(host.split(".")[index])
+    except (ValueError, IndexError):
+        return 0
+
+
+class ConfigUpdatePayload(BaseModel):
+    """★ review fix: update_config previously took a raw dict with zero validation —
+    budget_monthly_usd:"abc" would poison config.toml and permanently 500 every
+    /api/meter/summary; platform_url accepted arbitrary URLs that the platform mode
+    would send the gateway key to as a Bearer header."""
+
+    model_config = {"extra": "ignore"}
+
+    mode: Optional[str] = None
+    region: Optional[str] = None
+    # ★ manual-override lock flag (sent together with region by the frontend:
+    # manual save sets True, explicit re-detect sets False)
+    region_manual: Optional[bool] = None
+    platform_url: Optional[str] = None
+    budget_monthly_usd: Optional[float] = Field(default=None, ge=0, le=1_000_000)
+    # percent 10-100 (the Settings slider range); legacy 0-1 values are normalized
+    # in TokenEffConfig.__post_init__ — a le=10 bound here silently 422'd every
+    # normal slider value and killed the whole budget form (contract review find)
+    alert_threshold: Optional[float] = Field(default=None, ge=0, le=100)
+    proxy_port: Optional[int] = Field(default=None, ge=1024, le=65535)
+
+    @field_validator("mode")
+    @classmethod
+    def _check_mode(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("byok", "platform"):
+            raise ValueError("mode must be 'byok' or 'platform'")
+        return v
+
+    @field_validator("region")
+    @classmethod
+    def _check_region(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip().lower()
+            if v not in ("cn", "global"):
+                raise ValueError("region must be 'cn' or 'global'")
+        return v
+
+    @field_validator("platform_url")
+    @classmethod
+    def _check_platform_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return v  # empty = fall back to region default, allowed
+        # The platform key is sent to this URL as a Bearer header (platform_router);
+        # require https, and reject loopback/private/link-local hosts — verified
+        # during testing that https://127.0.0.1 previously passed and the key would
+        # be delivered to any local https service.
+        if not v.startswith("https://") or len(v) <= len("https://"):
+            raise ValueError("platform_url must start with https://")
+        from urllib.parse import urlparse
+
+        host = (urlparse(v).hostname or "").lower()
+        blocked = (
+            host in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+            or host.startswith("127.")
+            or host.startswith("10.")
+            or host.startswith("192.168.")
+            or host.startswith("169.254.")
+            or (host.startswith("172.") and 16 <= _parse_octet(host, 1) <= 31)
+        )
+        if blocked:
+            raise ValueError("platform_url 不能指向本机或内网地址")
+        return v
+
+
 @app.post("/api/config")
-async def update_config(payload: dict):
+async def update_config(payload: ConfigUpdatePayload):
     """Update non-sensitive config (mode/region/budget/proxy_port/alert_threshold).
 
     Sensitive keys go through a separate endpoint (/api/config/key); only non-sensitive fields here.
-    ★ M7/M12 fix (audit): field validation + gateway URL whitelist + region cascades
-    platform_url via set_region (previously a region change here left the old gateway).
+    Invalid values are rejected with 422 by the Pydantic model instead of poisoning config.toml.
     """
-    import re as _re
-
     cfg = cfg_module.get_config()
     changed: dict = {}
-    errors: dict = {}
-
-    for k, v in payload.items():
-        if k not in {"mode", "region", "budget_monthly_usd", "proxy_port", "alert_threshold", "platform_url"}:
+    data = payload.model_dump(exclude_none=True)
+    for k, v in data.items():
+        if not hasattr(cfg, k):
             continue
-        # Field-level validation (M12: bad values previously crashed `tokeneff start`)
-        if k == "mode" and v not in ("byok", "platform"):
-            errors[k] = "must be byok|platform"
-            continue
-        if k == "region" and v not in ("cn", "global"):
-            errors[k] = "must be cn|global"
-            continue
-        if k == "proxy_port":
-            try:
-                v = int(v)
-                if not (1 <= v <= 65535):
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors[k] = "must be int 1-65535"
-                continue
-        if k in ("budget_monthly_usd", "alert_threshold"):
-            try:
-                v = float(v)
-                if v < 0:
-                    raise ValueError
-                if k == "alert_threshold" and v > 1:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors[k] = "must be a non-negative number" + (" ≤1" if k == "alert_threshold" else "")
-                continue
-        if k == "platform_url":
-            ok, msg = _validate_gateway_url(v)
-            if not ok:
-                errors[k] = msg
-                continue
-        if hasattr(cfg, k):
+        if k == "region":
+            # region cascades platform_url + currency via set_region (★ R3 frontend wiring:
+            # a bare setattr would bypass the cascade, leaving platform_url stale and key
+            # verification hitting the wrong gateway). Mirrors the CLI wizard's behavior.
+            cfg.set_region(v)
+            changed["region"] = cfg.region
+            changed["platform_url"] = cfg.platform_url
+        else:
             setattr(cfg, k, v)
             changed[k] = v
-
-    # Region change cascades platform_url (M12: keep parity with the wizard path)
-    if "region" in changed and "platform_url" not in changed:
-        cfg.set_region(changed["region"])
 
     if changed:
         cfg_module.save(cfg)
         cfg_module.load(force=True)  # clear cache
-    return {"updated": changed, "errors": errors}
+    # "errors" kept empty for response-shape compatibility (older clients read it)
+    return {"updated": changed, "errors": {}}
 
 
 @app.post("/api/config/key")
@@ -328,7 +428,10 @@ async def set_provider_key(payload: dict):
     key = payload.get("key")
     if not provider or not key:
         return {"ok": False, "error": "provider 和 key 必填"}
-    cfg_module.set_api_key(provider, key)
+    if not cfg_module.set_api_key(provider, key):
+        # ★ review fix: no secure keyring backend → refuse instead of silently
+        # losing the key (previously the failure was swallowed and "ok" lied)
+        return {"ok": False, "error": "无可用安全密钥库（keyring），key 未存储。桌面环境或凭据管理器不可用。"}
     # Read back to verify (★ H1: keyring packaging failures surface here)
     stored = cfg_module.get_api_key(provider)
     return {"ok": stored == key, "provider": provider}
@@ -407,7 +510,8 @@ async def set_platform_key(payload: dict):
     key = payload.get("key")
     if not key:
         return {"ok": False, "error": "key 必填"}
-    cfg_module.set_platform_key(key)
+    if not cfg_module.set_platform_key(key):
+        return {"ok": False, "error": "无可用安全密钥库（keyring），key 未存储。桌面环境或凭据管理器不可用。"}
     stored = cfg_module.get_platform_key()
     return {"ok": stored == key, "has_platform_key": stored is not None}
 

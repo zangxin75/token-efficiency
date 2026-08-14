@@ -34,17 +34,30 @@ fn detect_form() -> String {
 }
 
 /// Start the sidecar via tauri-plugin-shell (the tokeneff-sidecar declared via externalBin).
-/// Returns true on success. When the main process exits, Tauri tears down the child automatically.
+/// Returns true on success.
+///
+/// ★ review fix: the previous comment claimed "Tauri tears down the child automatically on
+/// exit" — verified against tauri-plugin-shell 2.3.5 source this is FALSE for Rust-side
+/// spawns: the plugin's exit cleanup (RunEvent::Exit → shell.children kill loop) only
+/// tracks children spawned from JS via the `spawn` command; Command::spawn from Rust
+/// never registers into it, and CommandChild has no Drop impl. Actual teardown is done
+/// by our own RunEvent::Exit handler in run().
 fn spawn_sidecar(app: &tauri::AppHandle) -> bool {
-    match app
-        .shell()
-        .sidecar("tokeneff-sidecar")
-        .and_then(|cmd| cmd.spawn())
+    let sidecar = app.shell().sidecar("tokeneff-sidecar");
+    // ★ dev-build escape hatch for sidecar CORS: `tauri dev` still spawns the
+    // PACKAGED sidecar exe (externalBin → PyInstaller frozen → sys.frozen=True),
+    // so the sidecar's frozen-based CORS would reject the vite dev origin and the
+    // dev ball stays grey. cfg!(debug_assertions) is true only in `tauri dev`
+    // builds; release/NSIS builds never set it, keeping production CORS tight.
+    let command = if cfg!(debug_assertions) {
+        sidecar.map(|cmd| cmd.env("SIDECAR_DEV", "1"))
+    } else {
+        sidecar
+    };
+    match command.and_then(|cmd| cmd.spawn())
     {
         Ok((_rx, child)) => {
             if let Ok(mut guard) = SIDECAR_CHILD.lock() {
-                // The old child (if any) is dropped directly; CommandChild drop does not kill,
-                // but the old process has already exited by the time we get here (watchdog confirms down before restarting).
                 *guard = Some(child);
             }
             true
@@ -56,14 +69,44 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> bool {
     }
 }
 
+/// Kill the tracked sidecar child (if any). Called on exit and before watchdog restarts.
+fn kill_sidecar() {
+    if let Ok(mut guard) = SIDECAR_CHILD.lock() {
+        if let Some(child) = guard.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
 /// Background-poll sidecar (7861) liveness; consecutive failures → notify frontend + auto-restart sidecar (B5 self-healing).
+///
+/// ★ review fixes:
+/// - probe requests carry a 2s timeout (reqwest defaults to NO total timeout — a hung
+///   sidecar accepting connections but never replying would freeze the watchdog itself,
+///   exactly when it is needed most);
+/// - restart is bounded (MAX_RESTARTS) with exponential backoff, instead of an
+///   unbounded respawn loop leaking a ~40MB PyInstaller process every ~25s;
+/// - the old child is explicitly killed before respawning (probe failure ≠ process
+///   death — a zombie sidecar can hold port 7861, making every restart drift ports).
 fn spawn_sidecar_watchdog(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
+        const MAX_RESTARTS: u32 = 5;
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[tokeneff] watchdog http client build failed: {e}");
+                return;
+            }
+        };
         // sidecar startup takes time; wait 3s before probing
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let mut consecutive_fail = 0u32;
+        let mut restarts = 0u32;
         loop {
-            let ok = match reqwest::get("http://127.0.0.1:7861/api/health").await {
+            let ok = match client.get("http://127.0.0.1:7861/api/health").send().await {
                 Ok(resp) => resp.status().is_success(),
                 Err(_) => false,
             };
@@ -72,23 +115,38 @@ fn spawn_sidecar_watchdog(app: tauri::AppHandle) {
                     let _ = app.emit("sidecar-status", "up");
                 }
                 consecutive_fail = 0;
+                restarts = 0; // healthy again → allow fresh restart budget
             } else {
                 consecutive_fail += 1;
                 if consecutive_fail == 1 {
                     let _ = app.emit("sidecar-status", "down");
                 }
-                // 2 consecutive failures → auto-restart sidecar (B5 self-healing, addresses the B4 TODO)
+                // 2 consecutive failures → auto-restart sidecar (B5 self-healing)
                 if consecutive_fail >= 2 {
-                    eprintln!("[tokeneff] sidecar unresponsive for {consecutive_fail} consecutive probes, attempting restart");
-                    // Clear the old handle
-                    if let Ok(mut guard) = SIDECAR_CHILD.lock() {
-                        *guard = None;
-                    }
-                    // Wait for the port to be released before spawn
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    if spawn_sidecar(&app) {
-                        let _ = app.emit("sidecar-status", "up");
-                        consecutive_fail = 0;
+                    if restarts >= MAX_RESTARTS {
+                        eprintln!("[tokeneff] sidecar restart budget exhausted ({MAX_RESTARTS}); giving up — check ~/.tokeneff or kill stale tokeneff-sidecar processes");
+                        // ★ review fix: "down" is a transient state the ball treats as
+                        // "reconnecting"; a terminal give-up needs its own signal so the
+                        // UI can tell the user self-healing stopped (stderr alone is invisible)
+                        let _ = app.emit("sidecar-status", "given-up");
+                        consecutive_fail = 0; // stop re-triggering this branch every probe
+                    } else {
+                        eprintln!("[tokeneff] sidecar unresponsive for {consecutive_fail} consecutive probes, attempting restart {}/{}", restarts + 1, MAX_RESTARTS);
+                        // Probe failure ≠ process death: kill the old child so it
+                        // releases port 7861 before the respawn (prevents port drift)
+                        kill_sidecar();
+                        // Exponential backoff: 2s, 4s, 8s, 16s, 32s — also covers the
+                        // port-release window and slow PyInstaller onefile startup
+                        let wait = 2u64 << restarts;
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        if spawn_sidecar(&app) {
+                            restarts += 1;
+                            consecutive_fail = 0;
+                            // emit "up" only after a probe confirms it, not on spawn success
+                            // (onefile extraction takes seconds; premature "up" flickers the ball)
+                        } else {
+                            restarts += 1;
+                        }
                     }
                 }
             }
@@ -99,9 +157,17 @@ fn spawn_sidecar_watchdog(app: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ★ Settings 开机自启开关：NSIS 装后写的 HKCU Run 键与此插件操作同一注册表
+    // 值（tauri-plugin-autostart Windows 实现也是 HKCU Run），插件 isEnabled 能
+    // 读到安装器写入的状态，双轨不会打架
+    let autostart = tauri_plugin_autostart::MacosLauncher::LaunchAgent;
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            autostart,
+            Some(vec!["--hidden"]),
+        ))
         .invoke_handler(tauri::generate_handler![detect_form])
         .setup(|app| {
             // ── Start sidecar (managed with the main process lifecycle) ────────────────────
@@ -142,6 +208,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // ★ review fix: Rust-side spawned children are NOT tracked by the shell
+            // plugin's own exit cleanup (verified against tauri-plugin-shell 2.3.5),
+            // so we must kill the sidecar ourselves on exit — otherwise every tray
+            // quit leaks a ~40MB orphan holding port 7861 (compounded by the HKCU
+            // Run autostart re-spawning the main app each login).
+            if let tauri::RunEvent::Exit = event {
+                kill_sidecar();
+            }
+            let _ = app;
+        });
 }
