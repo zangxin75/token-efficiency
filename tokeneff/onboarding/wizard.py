@@ -29,14 +29,10 @@ def run_setup_wizard() -> None:
 
     cfg = cfg_module.get_config()
 
-    # Step 1: region (auto-detect + confirm)
-    detected = detect_region()
-    region = questionary.select(
-        "你的地域？（影响定价货币 ¥/$）",
-        choices=["cn", "global"],
-        default=detected,
-    ).ask()
-    cfg.region = region
+    # Step 1: region — 静默自动判断（与网站 geo.js 一致，穿透 VPN，不询问用户）
+    # 程序按真实位置（时区为主信号）判断，直接联动网关引导到对应站。
+    # detect_region() 永远返回 cn/global（borderline fallback locale），不卡流程。
+    cfg.set_region(detect_region())
 
     # Step 2: pick a provider and set its key
     console.print()
@@ -86,6 +82,7 @@ def run_setup_wizard() -> None:
     cfg_module.save(cfg)
     console.print()
     console.print("[bold green]✅ 配置完成！[/bold green]")
+    console.print(f"  地域: [cyan]{cfg.region}[/cyan] | 网关: {cfg.get_platform_url()} | 货币: {cfg.get_currency()}")
     console.print(f"  配置文件: {cfg_module.CONFIG_PATH}")
     console.print(f"  现在运行 [cyan]tokeneff start[/cyan] 启动本地代理 (localhost:{cfg.proxy_port})")
     console.print(f"  然后把客户端的 base_url 指向 [cyan]http://localhost:{cfg.proxy_port}/v1[/cyan]")

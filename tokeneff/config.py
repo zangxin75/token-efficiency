@@ -65,6 +65,22 @@ class TokenEffConfig:
     def get_budget(self) -> float:
         return self.budget_monthly_usd
 
+    def set_region(self, region: str) -> None:
+        """Set region and cascade platform_url + currency (★ R1 引流转化方案).
+
+        Called after onboarding region confirmation. Auto-configures the gateway
+        URL for the detected region (cn→tokeneff.com, global→global.tokeneff.com).
+        Does NOT overwrite a user-customized platform_url — only resets it when
+        empty or still at a default value.
+        """
+        self.region = region
+        defaults = ("", "https://tokeneff.com", "https://global.tokeneff.com")
+        if self.platform_url in defaults:
+            self.platform_url = (
+                "https://tokeneff.com" if region == "cn"
+                else "https://global.tokeneff.com"
+            )
+
 
 # ── keyring read/write ──────────────────────────────────────────────────────────
 

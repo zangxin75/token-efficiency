@@ -174,6 +174,29 @@ async def get_config():
     }
 
 
+@app.get("/api/region/detect")
+async def detect_region_api():
+    """Region detection signals + recommendation (★ R1 onboarding display).
+
+    Multi-signal weighted (timezone primary, VPN-proof; IP secondary).
+    Returns raw signals + scores + recommended region + human-readable reason.
+    Frontend uses 'recommended' to preselect, 'reason' to show basis to user.
+    """
+    from ..region import detect_region_signals
+
+    sig = detect_region_signals()
+    return {
+        "timezone": sig.timezone,
+        "locale": sig.locale,
+        "ip_country": sig.ip_country,
+        "win_locale": sig.win_locale,
+        "cn_score": sig.cn_score,
+        "global_score": sig.global_score,
+        "recommended": sig.recommended,  # "cn"/"global"/None(borderline→confirm)
+        "reason": sig.reason,
+    }
+
+
 @app.get("/api/providers")
 async def list_providers():
     """Available provider list (★ B3 onboarding dropdown use; avoids hardcoding in the frontend).
