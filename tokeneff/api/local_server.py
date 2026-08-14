@@ -110,7 +110,7 @@ async def meter_summary():
     saved = await store.get_total_saved()
     history = await store.get_history_30d()
     forecast = SpendPredictor(store).predict_monthly(history, currency)
-    budget = cfg.get_budget()
+    budget = cfg.get_budget_in()
 
     return {
         "currency": currency,

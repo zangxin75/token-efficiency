@@ -74,6 +74,20 @@ async def intercept(request: Request, path: str):
 
     流程：route → adapt(anthropic) → 上游 → 计费 → 返回。
     """
+    # ★ H2 fix (audit): require a non-empty Authorization header.
+    # Blocks browser no-cors drive-by billing: a text/plain POST is a CORS "simple request"
+    # that skips preflight, so any malicious webpage could otherwise silently burn the
+    # user's keyring-stored key. Legitimate SDK clients always send an Authorization
+    # header (OpenAI SDK requires api_key; Claude Code sends auth); no-cors form posts
+    # cannot attach custom headers.
+    auth = request.headers.get("authorization", "").strip()
+    if not auth:
+        return Response(
+            content=json.dumps({"error": "missing Authorization header"}),
+            status_code=401,
+            media_type="application/json",
+        )
+
     # 1. 解析请求体
     body = await request.body()
     try:

@@ -65,6 +65,18 @@ class TokenEffConfig:
     def get_budget(self) -> float:
         return self.budget_monthly_usd
 
+    def get_budget_in(self, currency: str | None = None) -> float:
+        """Budget converted to the display currency (★ H1 audit fix).
+
+        budget_monthly_usd is always stored in USD (wizard converts ¥ input ÷ rate).
+        Display must match the meter's currency: CNY users see the ¥ equivalent.
+        """
+        cur = currency or self.get_currency()
+        if cur == "CNY":
+            from .meter.collector import USD_CNY_RATE
+            return self.budget_monthly_usd * USD_CNY_RATE
+        return self.budget_monthly_usd
+
     def set_region(self, region: str) -> None:
         """Set region and cascade platform_url + currency (★ R1 引流转化方案).
 

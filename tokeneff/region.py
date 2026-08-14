@@ -28,6 +28,8 @@ _CN_TIMEZONES = {
     "Asia/Harbin", "PRC",
     # Windows TimeZoneKeyName
     "China Standard Time", "China Daylight Time",
+    # Windows localized tzname fallback (Chinese-locale systems)
+    "中国标准时间", "中国夏令时",
 }
 
 # IP probe services — must be reachable from mainland China (ipapi.co/ip-api.com are blocked).
@@ -56,11 +58,11 @@ def _detect_timezone() -> str:
     """Get timezone name (IANA on Linux/macOS, Windows name on Win). VPN cannot change this.
 
     ★ Avoid tzname() 'CST' — ambiguous (China UTC+8 vs US Central UTC-6). Prefer:
-    1. /etc/timezone (Linux IANA name)
+    1. /etc/timezone (Debian IANA name) or /etc/localtime symlink (macOS/Fedora/Arch)
     2. Windows registry TimeZoneKeyName
-    3. tzname fallback (last resort, flagged ambiguous)
+    3. tzname fallback (last resort; localized names like 中国标准时间 handled in set)
     """
-    # 1. Linux: /etc/timezone gives IANA name (e.g. "Asia/Shanghai")
+    # 1a. Debian/Ubuntu: /etc/timezone gives IANA name (e.g. "Asia/Shanghai")
     try:
         with open("/etc/timezone") as f:
             tz = f.read().strip()
@@ -68,20 +70,32 @@ def _detect_timezone() -> str:
                 return tz
     except Exception:
         pass
+    # 1b. macOS/Fedora/Arch/RHEL: resolve /etc/localtime symlink → .../zoneinfo/Asia/Shanghai
+    try:
+        import re as _re
+        link = os.path.realpath("/etc/localtime")
+        m = _re.search(r"zoneinfo[/\\](.+)$", link)
+        if m:
+            return m.group(1)  # e.g. "Asia/Shanghai"
+    except Exception:
+        pass
     # 2. Windows: registry TimeZoneKeyName (e.g. "China Standard Time")
+    # ★ audit fix: raw string must use SINGLE backslashes — r"...\\..." embeds literal
+    # double backslashes and winreg.OpenKey fails silently (Chinese-Windows users all
+    # misrouted to global via the cascade this caused).
     if os.name == "nt":
         try:
             import winreg
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
-                r"SYSTEM\\CurrentControlSet\\Control\\TimeZoneInformation",
+                r"SYSTEM\CurrentControlSet\Control\TimeZoneInformation",
             ) as k:
                 tz, _ = winreg.QueryValueEx(k, "TimeZoneKeyName")
                 if tz:
                     return tz
         except Exception:
             pass
-    # 3. Fallback: tzname (may be ambiguous CST — combined with locale/offset in scoring)
+    # 3. Fallback: tzname (may be ambiguous CST or localized 中国标准时间 — both in set)
     try:
         return time.tzname[0] if time.tzname else ""
     except Exception:
@@ -89,10 +103,23 @@ def _detect_timezone() -> str:
 
 
 def _detect_locale() -> str:
-    """System locale (LC_CTYPE / LANG / LC_ALL)."""
+    """System locale (LC_ALL > LANG > LC_CTYPE), normalized for zh detection.
+
+    ★ audit fixes: ① LC_ALL has higher priority than LANG (order was reversed);
+    ② Windows returns localized names like "Chinese (Simplified)_China" which do
+    not start with "zh" — normalize to "zh_cn" so the zh signal fires.
+    """
     try:
-        loc = locale.getlocale()[0] or os.environ.get("LANG", "") or os.getenv("LC_ALL", "")
-        return (loc or "").lower()
+        loc = (
+            locale.getlocale()[0]
+            or os.getenv("LC_ALL", "")
+            or os.environ.get("LANG", "")
+        )
+        loc = (loc or "").lower()
+        # Windows localized locale name → normalize to a zh_ prefix
+        if loc.startswith("chinese"):
+            return "zh_cn"
+        return loc
     except Exception:
         return ""
 
@@ -119,8 +146,16 @@ def _detect_ip_country() -> str | None:
                 if resp.status_code != 200:
                     continue
                 data = resp.json()
+                # ★ H3 fix (audit): parse BOTH probe response shapes.
+                # myip.ipip.net returns {"ret":"ok","data":{"location":["中国","辽宁",...]}}
+                #   — the country is nested at data.location[0], NOT top-level "country"
+                #   (the old code never matched → the CN-reachable first probe was dead code).
+                # ipinfo.io returns {"country":"CN"} at top level.
                 country = (data.get("country") or data.get("countryCode") or "")
-                # myip.ipip.net returns Chinese name "中国"
+                if not country:
+                    loc_list = (data.get("data") or {}).get("location") or []
+                    if loc_list:
+                        country = str(loc_list[0])  # e.g. "中国"
                 if "中国" in country or country.upper() == "CN":
                     return "CN"
                 if country:
@@ -217,5 +252,8 @@ def detect_region() -> str:
     sig = detect_region_signals()
     if sig.recommended:
         return sig.recommended
-    # Borderline: fall back to locale signal (avoid forcing in non-interactive contexts)
-    return "cn" if sig.locale.startswith("zh") else "global"
+    # ★ M6 fix (audit): borderline fallback uses the TIMEZONE signal, not locale.
+    # zh-TW/zh-HK/zh-SG users have zh locales but non-CN timezones — falling back to
+    # locale routed them to the cn site (ICP/Alipay) against intent. Timezone matches
+    # the website's geo.js verdict, keeping client and website consistent.
+    return "cn" if sig.timezone in _CN_TIMEZONES else "global"

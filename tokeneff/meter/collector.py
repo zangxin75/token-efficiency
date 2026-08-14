@@ -15,6 +15,11 @@ from . import calculator
 from .store import UsageStore
 from .types import CostBreakdown, UsageRecord, UsageResult
 
+# ★ H1 (audit): USD→CNY conversion rate for CN-region users. calculator returns USD
+# (pricing.json is USD per M tokens); CNY users get real-¥ amounts at record time.
+# TODO: make configurable (env/config) once FX fluctuation matters.
+USD_CNY_RATE = 7.2
+
 
 class Collector:
     """Meter data collector."""
@@ -47,18 +52,36 @@ class Collector:
             cost = calculator.calculate(model, usage, mode)
         currency = self._get_currency()
         mode = self._get_mode()
-        rec = UsageRecord(
-            timestamp=datetime.now().isoformat(timespec="seconds"),
-            model=model,
-            mode=mode,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.completion_tokens,
-            charged_amount=cost.charged,
-            official_amount=cost.official,
-            saved_amount=cost.saved,
-            currency=currency,
-            latency_ms=int(elapsed * 1000) if elapsed else 0,
-        )
+
+        # ★ H1 fix (audit): calculator returns USD amounts (pricing.json is USD/M tokens).
+        # For CNY users convert to real CNY at record time — previously the USD number was
+        # stored with a "CNY" label, understating every amount by the FX rate (~7.2×).
+        if currency == "CNY":
+            rec = UsageRecord(
+                timestamp=datetime.now().isoformat(timespec="seconds"),
+                model=model,
+                mode=mode,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.completion_tokens,
+                charged_amount=round(cost.charged * USD_CNY_RATE, 6),
+                official_amount=round(cost.official * USD_CNY_RATE, 6),
+                saved_amount=round(cost.saved * USD_CNY_RATE, 6),
+                currency=currency,
+                latency_ms=int(elapsed * 1000) if elapsed else 0,
+            )
+        else:
+            rec = UsageRecord(
+                timestamp=datetime.now().isoformat(timespec="seconds"),
+                model=model,
+                mode=mode,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.completion_tokens,
+                charged_amount=cost.charged,
+                official_amount=cost.official,
+                saved_amount=cost.saved,
+                currency=currency,
+                latency_ms=int(elapsed * 1000) if elapsed else 0,
+            )
         await self.store.record(rec)
         # Persist immediately: metering is low-frequency (every record is a real cost), and
         # proxy(7860) and sidecar(7861) are separate processes sharing the same SQLite file —

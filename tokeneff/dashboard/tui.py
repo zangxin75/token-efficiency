@@ -43,7 +43,7 @@ class MeterDashboard:
         rate = await self.store.get_recent_rate()
         history = await self.store.get_history_30d()
         forecast = self.predictor.predict_monthly(history, self.currency)
-        budget = cfg_module.get_config().get_budget()
+        budget = cfg_module.get_config().get_budget_in()
 
         layout = Layout()
         layout.split_column(

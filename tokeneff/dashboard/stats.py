@@ -83,7 +83,7 @@ def show_stats(model_filter: str | None = None) -> None:
     console.print()
 
     # ★ v0.2: budget alert (show progress bar + threshold alert when monthly budget > 0)
-    budget = cfg_module.get_config().get_budget()
+    budget = cfg_module.get_config().get_budget_in()
     if budget > 0:
         pct = stats["month"] / budget * 100
         console.print(
