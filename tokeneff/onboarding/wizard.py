@@ -55,12 +55,29 @@ def run_setup_wizard() -> None:
         ok, msg = asyncio.run(byok_router.verify_key(provider, key))
         console.print(f"  {msg}")
         if ok:
-            cfg_module.set_api_key(provider, key)
-            console.print(f"  [green]✓ {provider} key 已保存到 keyring[/green]")
+            _save_key_verified(provider, key)
         else:
             still = questionary.confirm("key 验证失败，仍要保存吗？").ask()
             if still:
-                cfg_module.set_api_key(provider, key)
+                _save_key_verified(provider, key)
+
+
+def _save_key_verified(provider: str, key: str) -> None:
+    """set_api_key + read-back verification (★ M11 audit fix).
+
+    _kr_set silently swallows keyring failures; the wizard previously printed
+    "saved to keyring" unconditionally. Read back and compare — mismatch means
+    the keyring backend is broken and the user must know NOW, not next session.
+    """
+    cfg_module.set_api_key(provider, key)
+    stored = cfg_module.get_api_key(provider)
+    if stored == key:
+        console.print(f"  [green]✓ {provider} key 已保存到 keyring（回读校验通过）[/green]")
+    else:
+        console.print(
+            f"  [bold red]⚠ {provider} key 保存失败！keyring 后端可能不可用"
+            f"（headless 环境缺 keyrings.alt？）。key 未持久化，重启后将丢失。[/bold red]"
+        )
 
     # Step 3: budget (optional)
     console.print()

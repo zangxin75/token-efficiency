@@ -179,13 +179,23 @@ async def detect_region_api():
     """Region detection signals + recommendation (★ R1 onboarding display).
 
     Multi-signal weighted (timezone primary, VPN-proof; IP secondary).
-    Returns raw signals + scores + recommended region + human-readable reason.
-    Frontend uses 'recommended' to preselect, 'reason' to show basis to user.
+    ★ M4 fix (audit): detection does blocking network IO (2 probes × 3s timeout) —
+    run in a thread pool so the event loop (and every other polling endpoint)
+    keeps serving; cache the result for 5 minutes (signals barely change).
     """
+    import time as _time
+
     from ..region import detect_region_signals
 
-    sig = detect_region_signals()
-    return {
+    now = _time.monotonic()
+    cached = getattr(detect_region_api, "_cache", None)
+    if cached and now - cached[0] < 300:
+        return cached[1]
+
+    import anyio
+
+    sig = await anyio.to_thread.run_sync(detect_region_signals)
+    result = {
         "timezone": sig.timezone,
         "locale": sig.locale,
         "ip_country": sig.ip_country,
@@ -195,6 +205,8 @@ async def detect_region_api():
         "recommended": sig.recommended,  # "cn"/"global"/None(borderline→confirm)
         "reason": sig.reason,
     }
+    detect_region_api._cache = (now, result)
+    return result
 
 
 @app.get("/api/providers")
@@ -217,23 +229,93 @@ async def list_providers():
     return {"providers": result}
 
 
+def _validate_gateway_url(url: str) -> tuple[bool, str]:
+    """Platform gateway URL whitelist (★ M7 audit fix: anti-SSRF / anti-key-exfil).
+
+    A malicious local process (or a poisoned localhost webpage via a simple-request POST)
+    could previously set platform_url to an attacker host — the proxy would then send the
+    user's platform key there as a Bearer token; /api/config/platform-verify could also be
+    used as an intranet port-scan oracle. Now: only https://*.tokeneff.com official domains
+    plus localhost (dev) are accepted.
+    """
+    import re as _re
+
+    url = (url or "").strip().rstrip("/")
+    if not url:
+        return False, "URL is empty"
+    m = _re.match(r"^https?://([^/:]+)", url)
+    if not m:
+        return False, "URL must start with http(s)://"
+    host = m.group(1).lower()
+    # Local dev allowed (plain http OK on loopback only)
+    if host in ("localhost", "127.0.0.1", "::1"):
+        return True, url
+    if not url.startswith("https://"):
+        return False, "External gateway must use https://"
+    if host == "tokeneff.com" or host.endswith(".tokeneff.com"):
+        return True, url
+    return False, f"Non-official gateway domain: {host} (risk of platform-key exfiltration)"
+
+
 @app.post("/api/config")
 async def update_config(payload: dict):
     """Update non-sensitive config (mode/region/budget/proxy_port/alert_threshold).
 
     Sensitive keys go through a separate endpoint (/api/config/key); only non-sensitive fields here.
+    ★ M7/M12 fix (audit): field validation + gateway URL whitelist + region cascades
+    platform_url via set_region (previously a region change here left the old gateway).
     """
+    import re as _re
+
     cfg = cfg_module.get_config()
-    allowed = {"mode", "region", "budget_monthly_usd", "proxy_port", "alert_threshold", "platform_url"}
-    changed = {}
+    changed: dict = {}
+    errors: dict = {}
+
     for k, v in payload.items():
-        if k in allowed and hasattr(cfg, k):
+        if k not in {"mode", "region", "budget_monthly_usd", "proxy_port", "alert_threshold", "platform_url"}:
+            continue
+        # Field-level validation (M12: bad values previously crashed `tokeneff start`)
+        if k == "mode" and v not in ("byok", "platform"):
+            errors[k] = "must be byok|platform"
+            continue
+        if k == "region" and v not in ("cn", "global"):
+            errors[k] = "must be cn|global"
+            continue
+        if k == "proxy_port":
+            try:
+                v = int(v)
+                if not (1 <= v <= 65535):
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors[k] = "must be int 1-65535"
+                continue
+        if k in ("budget_monthly_usd", "alert_threshold"):
+            try:
+                v = float(v)
+                if v < 0:
+                    raise ValueError
+                if k == "alert_threshold" and v > 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors[k] = "must be a non-negative number" + (" ≤1" if k == "alert_threshold" else "")
+                continue
+        if k == "platform_url":
+            ok, msg = _validate_gateway_url(v)
+            if not ok:
+                errors[k] = msg
+                continue
+        if hasattr(cfg, k):
             setattr(cfg, k, v)
             changed[k] = v
+
+    # Region change cascades platform_url (M12: keep parity with the wizard path)
+    if "region" in changed and "platform_url" not in changed:
+        cfg.set_region(changed["region"])
+
     if changed:
         cfg_module.save(cfg)
         cfg_module.load(force=True)  # clear cache
-    return {"updated": changed}
+    return {"updated": changed, "errors": errors}
 
 
 @app.post("/api/config/key")
@@ -292,7 +374,12 @@ async def verify_platform_key(payload: dict):
         return {"ok": False, "message": "key 必填"}
     cfg = cfg_module.get_config()
     # Allow the body to temporarily specify a url (verify an unsaved gateway address); otherwise use configured/default
-    base = (payload.get("platform_url") or cfg.get_platform_url()).rstrip("/")
+    base_raw = payload.get("platform_url") or cfg.get_platform_url()
+    # ★ M7: whitelist the probe URL — this endpoint must not become an intranet port-scan oracle
+    ok, msg = _validate_gateway_url(base_raw)
+    if not ok:
+        return {"ok": False, "message": f"网关地址不被允许: {msg}"}
+    base = base_raw.strip().rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(

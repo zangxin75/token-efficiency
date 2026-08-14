@@ -146,17 +146,47 @@ def save(cfg: "TokenEffConfig") -> None:
 
 
 def load(force: bool = False) -> "TokenEffConfig":
+    """Load config from ~/.tokeneff/config.toml.
+
+    ★ M13 fix (audit): a corrupt file or unknown key (e.g. written by a newer
+    version) previously raised inside TokenEffConfig(**...) and was silently
+    swallowed — the user's region/budget reset to defaults and could then be
+    overwritten by the next save. Now: unknown keys are dropped (forward
+    compat), and a parse failure backs up the file to .bak with a warning
+    instead of silently discarding everything.
+    """
     global _config
     if _config is not None and not force:
         return _config
     if CONFIG_PATH.exists():
+        import dataclasses
+        import logging
+        import shutil
+
+        logger = logging.getLogger("tokeneff.config")
         try:
             doc = tomlkit.parse(CONFIG_PATH.read_text(encoding="utf-8"))
-            _config = TokenEffConfig(**{k: v.unwrap() if hasattr(v, "unwrap") else v
-                                        for k, v in doc.items()})
+            valid_fields = {f.name for f in dataclasses.fields(TokenEffConfig)}
+            unknown = [k for k in doc.keys() if k not in valid_fields]
+            if unknown:
+                logger.warning(f"config.toml has unknown keys (newer version?), ignored: {unknown}")
+            _config = TokenEffConfig(**{
+                k: (v.unwrap() if hasattr(v, "unwrap") else v)
+                for k, v in doc.items() if k in valid_fields
+            })
             return _config
-        except Exception:
-            pass
+        except Exception as e:
+            # Back up the corrupt file so nothing is silently lost, then fall
+            # back to defaults (the backup preserves manual recovery).
+            try:
+                backup = CONFIG_PATH.with_suffix(".toml.bak")
+                shutil.copy2(CONFIG_PATH, backup)
+                logger.warning(
+                    f"config.toml parse failed ({e}); reset to defaults. "
+                    f"Original backed up to {backup}"
+                )
+            except Exception:
+                logger.warning(f"config.toml parse failed ({e}); reset to defaults (backup also failed)")
     _config = TokenEffConfig()
     return _config
 

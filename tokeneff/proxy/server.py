@@ -102,7 +102,16 @@ async def intercept(request: Request, path: str):
     req_headers = dict(request.headers)
     if mode == "platform":
         # ★ 透传 path：Claude Code 打 /v1/messages，需转发到网关同名端点
-        upstream_url, headers = platform_router.route(model, body, req_headers, path)
+        # ★ M14 fix (audit): platform key not configured raises RuntimeError with a
+        # helpful Chinese message — surface it as 400, not a bare 500.
+        try:
+            upstream_url, headers = platform_router.route(model, body, req_headers, path)
+        except RuntimeError as e:
+            return Response(
+                content=json.dumps({"error": str(e)}),
+                status_code=400,
+                media_type="application/json",
+            )
         provider_format = "openai"  # ★ platform 模式不做本地 adapt，网关自处理格式转换
     else:
         upstream_url, headers = byok_router.route(model, body, req_headers)
@@ -164,34 +173,83 @@ async def intercept(request: Request, path: str):
         )
 
 
-async def _stream_and_meter(upstream_resp, model: str, mode: str, start_time: float):
-    """流式响应：逐块透传 + 可选 usage 采集。
+def _scan_sse_usage_line(line: bytes, acc: dict) -> None:
+    """Parse one SSE data line, accumulating usage from both wire formats.
 
-    简化版 MVP：直接透传上游流，不做实时推送（v0.1 无 TUI Live）。
-    流式 usage 解析依赖上游在末 chunk 返回 usage（OpenAI 兼容），否则不计入。
+    ★ M8 fix (audit): Anthropic streams scatter usage across events —
+    message_start carries input_tokens, message_delta carries (cumulative)
+    output_tokens. OpenAI streams put the final usage on the last chunk.
+    max() accumulation handles both (deltas are cumulative, finals overwrite).
     """
-    accumulated = b""
-    async for chunk in upstream_resp.aiter_raw():
-        accumulated += chunk
-        yield chunk
-
-    # 流结束，尝试从末 chunk 解析 usage
-    elapsed = time.time() - start_time
+    line = line.strip()
+    if not line.startswith(b"data: "):
+        return
+    data_str = line[6:]
+    if data_str.strip() == b"[DONE]":
+        return
     try:
-        # 末 chunk 可能是 data: {...}\n\n
-        for line in accumulated.decode("utf-8").split("\n"):
-            if line.startswith("data: "):
-                data_str = line[6:]
-                if data_str.strip() == "[DONE]":
-                    continue
-                data = json.loads(data_str)
-                usage = UsageResult.from_dict(data)
-                if usage.has_data:
-                    await collector.record(model, usage, elapsed=elapsed)
-                    log.info(f"[metered stream] {model}: in={usage.input_tokens} out={usage.completion_tokens}")
-                    break
-    except Exception as e:
-        log.warning(f"stream usage parse error: {e}")
+        data = json.loads(data_str)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    # OpenAI stream: top-level usage on the final chunk
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        acc["in"] = max(acc["in"], usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+        acc["out"] = max(acc["out"], usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    # Anthropic stream: message_start → message.usage.input_tokens
+    if data.get("type") == "message_start":
+        mu = (data.get("message") or {}).get("usage") or {}
+        acc["in"] = max(acc["in"], mu.get("input_tokens") or 0)
+    # Anthropic stream: message_delta → usage.output_tokens (cumulative)
+    elif data.get("type") == "message_delta":
+        du = data.get("usage") or {}
+        acc["out"] = max(acc["out"], du.get("output_tokens") or 0)
+
+
+async def _stream_and_meter(upstream_resp, model: str, mode: str, start_time: float):
+    """流式响应：逐块透传 + 逐行 usage 采集（双格式）。
+
+    ★ M8 fix: previously the whole stream was accumulated in memory and only the
+    last OpenAI-format chunk was parsed — Anthropic streams (Claude Code, the
+    highest-volume scenario) were never metered ($0 recorded). Now lines are
+    parsed incrementally (no full-stream buffering) and both formats accumulate.
+    """
+    acc = {"in": 0, "out": 0}
+    buffer = b""
+    async for chunk in upstream_resp.aiter_raw():
+        yield chunk
+        # Parse complete lines as they arrive; keep only the trailing partial line
+        buffer += chunk
+        while b"\n" in buffer:
+            line, buffer = buffer.split(b"\n", 1)
+            try:
+                _scan_sse_usage_line(line, acc)
+            except Exception:
+                pass  # metering must never break the stream
+
+    # Trailing partial line (stream ended without final newline)
+    if buffer:
+        try:
+            _scan_sse_usage_line(buffer, acc)
+        except Exception:
+            pass
+
+    # Record once at stream end
+    elapsed = time.time() - start_time
+    if acc["in"] or acc["out"]:
+        usage = UsageResult(
+            input_tokens=acc["in"],
+            completion_tokens=acc["out"],
+            total_tokens=acc["in"] + acc["out"],
+            has_data=True,
+        )
+        try:
+            await collector.record(model, usage, elapsed=elapsed)
+            log.info(f"[metered stream] {model}: in={acc['in']} out={acc['out']}")
+        except Exception as e:
+            log.warning(f"stream usage record error: {e}")
 
 
 async def _stream_proxy(upstream_url, body, headers, model, mode, start_time):

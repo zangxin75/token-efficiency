@@ -144,3 +144,72 @@ def test_cn_timezone_set_includes_windows_and_localized():
     """Windows registry names + localized tzname are recognized as CN."""
     assert "China Standard Time" in _CN_TIMEZONES
     assert "中国标准时间" in _CN_TIMEZONES
+
+
+# ── M7: gateway URL whitelist (anti-SSRF / anti-key-exfil) ────────────────────
+
+
+def test_m7_gateway_url_whitelist():
+    from tokeneff.api.local_server import _validate_gateway_url as v
+    # Official + subdomains + localhost pass
+    assert v("https://tokeneff.com")[0]
+    assert v("https://global.tokeneff.com")[0]
+    assert v("https://api.tokeneff.com")[0]
+    assert v("http://localhost:6001")[0]
+    assert v("http://127.0.0.1:5001")[0]
+    # Attacker domains / SSRF targets rejected
+    assert not v("https://evil.com")[0]
+    assert not v("http://evil.com")[0]
+    assert not v("http://192.168.1.1:8080")[0]
+    assert not v("ftp://tokeneff.com")[0]
+    assert not v("not-a-url")[0]
+    assert not v("")[0]
+
+
+# ── M12: update_config validation + region cascade ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_m12_config_validation_and_region_cascade(monkeypatch, tmp_path):
+    from tokeneff.api import local_server as ls
+    from tokeneff import config as C
+
+    # Isolated config file
+    monkeypatch.setattr(C, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(C, "CONFIG_DIR", tmp_path)
+    C._config = None
+    monkeypatch.setattr(ls.cfg_module, "get_config", C.load)
+
+    # Bad values rejected, not persisted
+    r = await ls.update_config({"proxy_port": "abc", "mode": "bogus", "budget_monthly_usd": -5})
+    assert r["updated"] == {}
+    assert "proxy_port" in r["errors"] and "mode" in r["errors"] and "budget_monthly_usd" in r["errors"]
+
+    # platform_url whitelist enforced
+    r = await ls.update_config({"platform_url": "https://evil.com"})
+    assert r["updated"] == {} and "platform_url" in r["errors"]
+
+    # region change cascades platform_url (M12 parity with wizard set_region)
+    r = await ls.update_config({"region": "cn", "platform_url": ""})
+    assert r["updated"].get("region") == "cn"
+    assert C.load(force=True).get_platform_url() == "https://tokeneff.com"
+
+    C._config = None
+
+
+# ── M13: corrupt config backed up, not silently reset ─────────────────────────
+
+
+def test_m13_corrupt_config_backed_up(tmp_path, monkeypatch):
+    from tokeneff import config as C
+
+    monkeypatch.setattr(C, "CONFIG_PATH", tmp_path / "config.toml")
+    monkeypatch.setattr(C, "CONFIG_DIR", tmp_path)
+    C._config = None
+    # Write a corrupt + a valid key
+    (tmp_path / "config.toml").write_text("region = \"cn\"\nBROKEN [[[")
+
+    cfg = C.load(force=True)
+    assert cfg.region == ""  # fell back to defaults (corrupt file)
+    assert (tmp_path / "config.toml.bak").exists()  # backup preserved for recovery
+    C._config = None
