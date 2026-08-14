@@ -17,6 +17,8 @@ import {
   verifyKey,
   saveKey,
   verifyPlatformKey,
+  discoverSidecarPort,
+  installSidecarRecovery,
   savePlatformKey,
   updateConfig,
   detectRegion,
@@ -169,6 +171,9 @@ watch(platformUrl, (v) => {
 });
 
 onMounted(() => {
+  // ★ port-drift fix: learn the sidecar's actual port before first load
+  discoverSidecarPort();
+  installSidecarRecovery();
   initLang();
   load();
   // Intercept titlebar × close: hide instead, so the window isn't destroyed and openSettings can find it again.

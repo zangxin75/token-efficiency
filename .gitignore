@@ -88,3 +88,6 @@ ball-screenshot.png
 *.tmp
 *key*backup*
 tokeneff-sidecar-*.spec
+
+# PyInstaller scratch output (real binaries land in src-tauri/binaries/)
+dist_sidecar/

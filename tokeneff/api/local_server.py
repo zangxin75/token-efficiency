@@ -525,6 +525,18 @@ def run_sidecar(host: str = "127.0.0.1", preferred_port: int = DEFAULT_API_PORT)
     if actual_port != preferred_port:
         log.warning(f"port {preferred_port} occupied, sidecar switched to {actual_port}")
     log.info(f"tokeneff sidecar API → http://{host}:{actual_port}/api")
+    # ★ port-drift fix: publish the ACTUAL port so consumers (frontend axios,
+    # Rust watchdog) don't hardcode 7861 — when 7861 is taken and the sidecar
+    # drifts to 7862+, hardcoded consumers were permanently disconnected.
+    # Stale-file defense is on the READERS: they probe /api/health and fall
+    # back to the default port when the file points at a dead process.
+    try:
+        from ..config import CONFIG_DIR
+
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        (CONFIG_DIR / "sidecar.port").write_text(str(actual_port), encoding="ascii")
+    except Exception as e:
+        log.warning(f"failed to write sidecar.port: {e}")
     uvicorn.run(app, host=host, port=actual_port, log_level="info")
     return actual_port
 

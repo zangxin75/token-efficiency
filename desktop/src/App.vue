@@ -10,6 +10,8 @@ import {
   fetchConfig,
   currencySymbol,
   fmt,
+  discoverSidecarPort,
+  installSidecarRecovery,
   type MeterSummary,
 } from "./sidecar";
 import { detectForm } from "./platform";
@@ -68,7 +70,9 @@ const givenUp = ref(false);
 let statusUnlisten: (() => void) | undefined;
 
 onMounted(() => {
-  refresh();
+  // ★ port-drift fix: learn the sidecar's actual port before first poll
+  discoverSidecarPort().then(() => refresh());
+  installSidecarRecovery();
   timer = window.setInterval(refresh, 1000);
   initLang();
   checkOnboarding();

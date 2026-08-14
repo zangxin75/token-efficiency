@@ -33,6 +33,21 @@ fn detect_form() -> String {
     }
 }
 
+/// Read the sidecar's ACTUAL port from ~/.tokeneff/sidecar.port (★ port-drift
+/// fix: when 7861 is occupied the sidecar drifts to 7862+; hardcoded consumers
+/// were permanently disconnected). Returns None when the file is missing or
+/// unparseable — callers fall back to the default 7861 and probe liveness.
+#[tauri::command]
+fn get_sidecar_port() -> Option<u16> {
+    let path = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(|home| std::path::PathBuf::from(home).join(".tokeneff").join("sidecar.port"))
+        .ok()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u16>().ok())
+}
+
 /// Start the sidecar via tauri-plugin-shell (the tokeneff-sidecar declared via externalBin).
 /// Returns true on success.
 ///
@@ -106,7 +121,15 @@ fn spawn_sidecar_watchdog(app: tauri::AppHandle) {
         let mut consecutive_fail = 0u32;
         let mut restarts = 0u32;
         loop {
-            let ok = match client.get("http://127.0.0.1:7861/api/health").send().await {
+            // ★ port-drift fix: probe the sidecar's ACTUAL port (read fresh each
+            // cycle — a restart may have landed on a different port); fall back
+            // to the default when the port file is missing/stale.
+            let port = get_sidecar_port().unwrap_or(7861);
+            let ok = match client
+                .get(format!("http://127.0.0.1:{port}/api/health"))
+                .send()
+                .await
+            {
                 Ok(resp) => resp.status().is_success(),
                 Err(_) => false,
             };
@@ -168,7 +191,7 @@ pub fn run() {
             autostart,
             Some(vec!["--hidden"]),
         ))
-        .invoke_handler(tauri::generate_handler![detect_form])
+        .invoke_handler(tauri::generate_handler![detect_form, get_sidecar_port])
         .setup(|app| {
             // ── Start sidecar (managed with the main process lifecycle) ────────────────────
             spawn_sidecar(app.handle());

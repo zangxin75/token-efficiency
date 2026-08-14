@@ -5,6 +5,8 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   fetchSummary,
   fetchModels,
+  discoverSidecarPort,
+  installSidecarRecovery,
   fetchConfig,
   currencySymbol,
   fmt,
@@ -41,6 +43,9 @@ async function refresh() {
 }
 
 onMounted(() => {
+  // ★ port-drift fix: learn the sidecar's actual port before first poll
+  discoverSidecarPort();
+  installSidecarRecovery();
   refresh();
   timer = window.setInterval(refresh, 1000);
   // Region (drives language) + mode: both low-frequency, fetched once

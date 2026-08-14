@@ -4,6 +4,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   fetchProviders,
   verifyKey,
+  discoverSidecarPort,
+  installSidecarRecovery,
   saveKey,
   detectRegion,
   updateConfig,
@@ -72,6 +74,9 @@ const progressIndex = computed(() =>
 );
 
 onMounted(async () => {
+  // ★ port-drift fix: learn the sidecar's actual port before first API call
+  await discoverSidecarPort();
+  installSidecarRecovery();
   initLang();
   // ★ R3 silent region detection — program decides, never asks the user
   // (consistent with website geo.js / CLI wizard). Falls back to cn on failure.
