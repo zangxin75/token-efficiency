@@ -180,7 +180,7 @@ async def verify_key(provider: str, api_key: str) -> tuple[bool, str]:
 
     verify_method = info.get("verify_method", "get")
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             if verify_method == "post":
                 probe_body = {
                     "model": info["models"][0],

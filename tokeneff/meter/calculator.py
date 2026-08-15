@@ -28,13 +28,41 @@ USD_TO_CNY = 7.2
 
 
 @lru_cache(maxsize=1)
-def load_pricing() -> dict:
+def _load_pricing_cached() -> dict:
+    """Load the pricing table; raise on failure so lru_cache never stores it.
+
+    lru_cache 只缓存正常 return 的值，不缓存异常 -- 失败在这里直接抛出，
+    下次调用会重试读盘（目录恢复后自愈）。
+    """
     with PRICING_PATH.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
+def load_pricing() -> dict:
+    """Load the pricing table, falling back to an empty table on failure.
+
+    * PyInstaller onefile 修复：资源解压在临时 _MEIxxxxx 目录，进程被强杀
+    （taskkill /F）后残留清理可能删掉在跑实例的解压目录 -- 此后每次 meter
+    读价格表都 FileNotFoundError，计量静默丢失（只留 warning 日志）。失败时
+    回退空表（get_model_pricing 再落 _FALLBACK），保证计量永不因价格表缺失
+    而丢记录；同时失败不进缓存，目录恢复后可自愈。
+    """
+    try:
+        return _load_pricing_cached()
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning(f"pricing table unavailable ({e}); using fallback pricing")
+        return {"models": {}, "international_models": {}}
+
+
+load_pricing.cache_clear = _load_pricing_cached.cache_clear  # type: ignore[attr-defined]
+
+
 def get_model_pricing(model: str) -> dict | None:
-    """Look up model pricing (Chinese models first, then international). Returns None if unknown."""
+    """Look up model pricing (Chinese models first, then international).
+
+    Returns None if unknown - calculate() then falls back to _FALLBACK rates
+    (定价表缺失时保证计量不丢，费率按兜底估算)。
+    """
     data = load_pricing()
     for key in ("models", "international_models"):
         entries = data.get(key, {})
@@ -59,7 +87,7 @@ def calculate(
     Platform mode: charged = our_* (our selling price), official = official price, saved > 0.
 
     currency: pricing_global.json is USD-only; when currency="CNY" the result is
-    converted at the record level (★ review fix — previously USD numbers were
+    converted at the record level (* review fix - previously USD numbers were
     stored with a CNY label, inflating/mislabeling readings by ~7x).
     """
     pricing = get_model_pricing(model)
@@ -68,7 +96,7 @@ def calculate(
 
     if pricing is None:
         # Unknown model: use fallback price, official=charged.
-        # ★ review fix: warn — fallback-priced records silently inflate the meter
+        # * review fix: warn - fallback-priced records silently inflate the meter
         # (users see a higher number with no way to tell why); pricing table
         # updates are the actual fix, this makes the gap visible.
         log.warning(

@@ -8,7 +8,7 @@ import sys
 
 
 def main():
-    from tokeneff.api.local_server import run_sidecar
+    from tokeneff.api.local_server import run_sidecar, start_proxy_thread
 
     # Port may be specified externally; host is intentionally NOT configurable —
     # the API writes provider keys into the system keyring and must never be
@@ -19,6 +19,9 @@ def main():
     parser.add_argument("--port", type=int, default=7861, help="API port")
     args = parser.parse_args()
 
+    # ★ 回归修复：打包版必须同时拉起计量代理，否则外部客户端连 proxy_port
+    # (7860) 拿到 ConnectionRefused —— 桌面版此前只起管理 API。
+    start_proxy_thread()
     run_sidecar(host="127.0.0.1", preferred_port=args.port)
 
 

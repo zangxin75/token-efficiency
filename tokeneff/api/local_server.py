@@ -484,7 +484,7 @@ async def verify_platform_key(payload: dict):
         return {"ok": False, "message": f"网关地址不被允许: {msg}"}
     base = base_raw.strip().rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
             resp = await client.get(
                 f"{base}/v1/models",
                 headers={"Authorization": f"Bearer {key}"},
@@ -517,6 +517,34 @@ async def set_platform_key(payload: dict):
 
 
 # ── startup entry point ────────────────────────────────────────────────────────
+
+
+def start_proxy_thread(port: int | None = None) -> threading.Thread:
+    """在守护线程中启动计量代理（proxy），供打包版 sidecar 调用。
+
+    ★ 回归修复：桌面版 sidecar 此前只启动管理 API (7861)，proxy (7860) 无人
+    拉起，外部 Claude Code 连 7860 直接 ConnectionRefused。proxy 与管理 API
+    同进程后共享 collector 单例（★ H2），且 sidecar 死亡时 proxy 一并退出，
+    Rust watchdog 重拉 sidecar 即可同时恢复两者。
+
+    线程异常（端口被占等）只记日志不抛出：管理 API 不应因 proxy 失败而失联。
+    """
+    import threading
+
+    cfg = cfg_module.get_config()
+    listen_port = port if port is not None else cfg.proxy_port
+
+    def _run():
+        try:
+            from ..proxy.server import run as run_proxy
+
+            run_proxy(host="127.0.0.1", port=listen_port)
+        except Exception as e:
+            log.error(f"proxy thread failed on port {listen_port}: {e}")
+
+    t = threading.Thread(target=_run, name="tokeneff-proxy", daemon=True)
+    t.start()
+    return t
 
 
 def run_sidecar(host: str = "127.0.0.1", preferred_port: int = DEFAULT_API_PORT) -> int:

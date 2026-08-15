@@ -177,7 +177,9 @@ async def intercept(request: Request, path: str):
         )
 
     # 非流式：独立 client，全量读完后即可释放
-    async with httpx.AsyncClient(timeout=300) as client:
+    # ★ trust_env=False：后端转发绝不能走用户浏览器代理（Clash 等）。经代理出口
+    # 会被网关按境外来源 302 到 global 站点，区域计费错乱（cn 用户被引到国际站）。
+    async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
         try:
             upstream_resp = await client.post(upstream_url, content=body, headers=headers)
         except Exception as e:
@@ -304,7 +306,9 @@ async def _stream_proxy(upstream_url, body, headers, model, mode, start_time):
     故 client 创建与流消费必须同处一个 async with——generator 不结束，with 不退出。
     非流式分支因 aread() 同步完成无此约束。
     """
-    async with httpx.AsyncClient(timeout=300) as client:
+    # ★ trust_env=False 同非流式分支：禁止经用户系统代理（Clash 出口会被网关
+    # 判定为境外来源 → 302 到 global 站点）
+    async with httpx.AsyncClient(timeout=300, trust_env=False) as client:
         try:
             async with client.stream("POST", upstream_url, content=body, headers=headers) as upstream_resp:
                 async for chunk in _stream_and_meter(upstream_resp, model, mode, start_time):
@@ -330,9 +334,37 @@ async def health():
 
 
 def run(host: str = "127.0.0.1", port: int = 7860):
+    """Start the proxy, dual-stack on loopback (IPv4 127.0.0.1 + IPv6 ::1).
+
+    ★ 双栈修复：Node.js (Claude Code) 解析 localhost 时优先 IPv6 (::1)。此前
+    仅绑 127.0.0.1，::1 连接被拒后客户端回退直连上游，绕过电表（终端能用
+    但计量不动）。两个预绑定 socket 各由一个 uvicorn Server 消费，同端口
+    双 bind 在 Windows/Linux 均可行（IPv4 与 IPv6 是独立地址空间）。
+    显式绑定两个 loopback 字面量而非 "localhost"：交给 DNS 解析会得到单一
+    地址，另一栈仍然不通。
+    """
+    import asyncio
+    import socket
+
     import uvicorn
-    log.info(f"Starting tokeneff proxy on {host}:{port}")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+
+    socks: list[socket.socket] = []
+    for bind_host in ("127.0.0.1", "::1"):
+        try:
+            family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+            s = socket.socket(family, socket.SOCK_STREAM)
+            s.bind((bind_host, port))
+            s.listen(128)
+            socks.append(s)
+        except OSError as e:
+            log.warning(f"bind {bind_host}:{port} failed, skipping: {e}")
+
+    if not socks:
+        raise RuntimeError(f"proxy 无法监听 {port}（IPv4/IPv6 均失败）")
+
+    log.info(f"Starting tokeneff proxy on 127.0.0.1:{port} + [::1]:{port}")
+    server = uvicorn.Server(uvicorn.Config(app, log_level="info"))
+    asyncio.run(server.serve(sockets=socks))
 
 
 if __name__ == "__main__":
