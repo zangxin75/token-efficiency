@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .. import config as cfg_module
+from . import L
 from ..meter.format import format_money
 from ..meter.predictor import BudgetAlert, SpendPredictor
 from ..meter.store import UsageStore
@@ -61,24 +62,24 @@ def show_stats(model_filter: str | None = None) -> None:
 
     # Title
     console.print()
-    console.print(f"[bold cyan]⚡ tokeneff 电表[/bold cyan]  [dim]({currency})[/dim]")
+    console.print(f'[bold cyan]⚡ tokeneff {L("电表", "meter")}[/bold cyan]  [dim]({currency})[/dim]')
     console.print()
 
     # Overview
     overview = Table(show_header=False, box=None, padding=(0, 2))
-    overview.add_row("今日花费", format_money(stats['today'], currency))
-    overview.add_row("本月累计", format_money(stats['month'], currency))
-    overview.add_row("近 7 天日均", format_money(stats['rate'], currency))
+    overview.add_row(L("今日花费", "Today"), format_money(stats['today'], currency))
+    overview.add_row(L("本月累计", "This month"), format_money(stats['month'], currency))
+    overview.add_row(L("近 7 天日均", "7-day avg"), format_money(stats['rate'], currency))
 
     # ★ v0.2: month-end forecast
     fc = stats["forecast"]
     if fc.confidence > 0.1:
         overview.add_row(
-            "月终预测",
-            f"~{format_money(fc.estimated, currency)} [dim]({fc.confidence:.0%} 置信)[/dim]",
+            L("月终预测", "Forecast"),
+            f"~{format_money(fc.estimated, currency)} [dim]({fc.confidence:.0%} {L('置信', 'conf.')})[/dim]",
         )
 
-    overview.add_row("累计节省", f"[green]{format_money(stats['saved'], currency)}[/green]")
+    overview.add_row(L("累计节省", "Total saved"), f"[green]{format_money(stats['saved'], currency)}[/green]")
     console.print(overview)
     console.print()
 
@@ -89,12 +90,12 @@ def show_stats(model_filter: str | None = None) -> None:
     if budget > 0:
         pct = stats["month"] / budget * 100
         console.print(
-            f"预算进度  {format_money(stats['month'], currency)} / {format_money(budget, currency)}  " + _char_bar(pct)
+            f'{L("预算进度", "Budget")}  {format_money(stats["month"], currency)} / {format_money(budget, currency)}  ' + _char_bar(pct)
         )
         threshold = cfg_module.get_config().alert_threshold
         if pct >= threshold:
             console.print(
-                f"[bold red]⚠ 已用 {pct:.0f}%，超过 {threshold:.0f}% 告警阈值，请注意控制用量[/bold red]"
+                f'[bold red]⚠ {L("已用", "Used")} {pct:.0f}%, {L("超过告警阈值", "over alert threshold")} {threshold:.0f}%[/bold red]'
             )
         console.print()
 
@@ -104,9 +105,9 @@ def show_stats(model_filter: str | None = None) -> None:
         models = [m for m in models if model_filter.lower() in m["model"].lower()]
 
     if models:
-        table = Table(title="今日模型花费分布", title_style="bold")
-        table.add_column("模型", style="cyan")
-        table.add_column("花费", justify="right")
+        table = Table(title=L("今日模型花费分布", "Today's model breakdown"), title_style="bold")
+        table.add_column(L("模型", "Model"), style="cyan")
+        table.add_column(L("花费", "Spend"), justify="right")
         table.add_column("tokens", justify="right")
         # ★ review fix: breakdown 契约字段对齐（charged/input_tokens/output_tokens）
         for m in models:
@@ -114,5 +115,5 @@ def show_stats(model_filter: str | None = None) -> None:
             table.add_row(m["model"], format_money(m["charged"], currency), f"{tokens:,}")
         console.print(table)
     else:
-        console.print("[dim]暂无今日用量数据[/dim]")
+        console.print(f'[dim]{L("暂无今日用量数据", "No usage data today")}[/dim]')
     console.print()

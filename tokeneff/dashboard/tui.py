@@ -20,6 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .. import config as cfg_module
+from . import L
 from ..meter.format import format_money
 from ..meter.predictor import SpendPredictor
 from ..meter.store import UsageStore
@@ -64,28 +65,28 @@ class MeterDashboard:
         table.add_column("bar", width=34)
 
         max_val = max(today, month / 30, 0.0001)
-        table.add_row("今日 Today", format_money(today, self.currency), self._mini_bar(today, max_val * 8))
+        table.add_row(L("今日 Today", "Today"), format_money(today, self.currency), self._mini_bar(today, max_val * 8))
 
         month_pct = (month / budget * 100) if budget > 0 else 0
         bar = self._char_bar_color(month_pct, 28) if budget > 0 else ""
-        table.add_row("本月 Month", format_money(month, self.currency), bar)
+        table.add_row(L("本月 Month", "This month"), format_money(month, self.currency), bar)
 
         if forecast.confidence > 0.1:
             table.add_row(
-                "月终预测 Est.",
+                L("月终预测 Est.", "Forecast"),
                 f"~{format_money(forecast.estimated, self.currency)}",
-                Text(f"{forecast.confidence:.0%} 置信", style="dim"),
+                Text(f"{forecast.confidence:.0%} {L('置信', 'conf.')}", style="dim"),
             )
 
-        return Panel(table, title="⚡ TokenEff 电表", border_style="cyan")
+        return Panel(table, title=f"⚡ TokenEff {L('电表', 'Meter')}", border_style="cyan")
 
     def _render_by_model(self, breakdown) -> Panel:
         """Middle: cost breakdown per model."""
         table = Table(box=None, padding=(0, 1), expand=True)
-        table.add_column("模型", style="cyan", width=22)
-        table.add_column("花费", justify="right", width=12)
+        table.add_column(L("模型", "Model"), style="cyan", width=22)
+        table.add_column(L("花费", "Spend"), justify="right", width=12)
         table.add_column("tokens", justify="right", width=14)
-        table.add_column("占比", width=22)
+        table.add_column(L("占比", "Share"), width=22)
 
         # ★ review fix: breakdown 契约字段已改为 charged/input_tokens/output_tokens，
         # 旧的 b["cost"]/b["tokens"] 下标在运行时才 KeyError（打开 TUI 即崩）
@@ -101,14 +102,14 @@ class MeterDashboard:
             )
 
         if not breakdown:
-            table.add_row("[dim]暂无数据[/dim]", "", "", "")
+            table.add_row(f'[dim]{L("暂无数据", "No data yet")}[/dim]', "", "", "")
 
-        return Panel(table, title="今日模型分布", border_style="blue")
+        return Panel(table, title=L("今日模型分布", "Today's Models"), border_style="blue")
 
     def _render_savings(self, saved) -> Panel:
         """Savings attribution."""
         text = Text()
-        text.append("💰 vs 官方定价累计节省  ", style="dim")
+        text.append(f"💰 {L('vs 官方定价累计节省', 'Saved vs official pricing')}  ", style="dim")
         text.append(format_money(saved, self.currency), style="bold green")
         return Panel(text, border_style="green")
 
@@ -118,9 +119,9 @@ class MeterDashboard:
         if rate > 0:
             text.append("⚡ ", style="yellow")
             text.append(f"{format_money(rate, self.currency)}/min", style="bold")
-            text.append(f"  ·  更新于 {datetime.now().strftime('%H:%M:%S')}", style="dim")
+            text.append(f"  ·  {L('更新于', 'updated')} {datetime.now().strftime('%H:%M:%S')}", style="dim")
         else:
-            text.append("⚪ Idle — 等待请求...", style="dim")
+            text.append(f"⚪ Idle — {L('等待请求...', 'waiting for requests...')}", style="dim")
         return Panel(text, border_style="dim")
 
     def _mini_bar(self, value: float, max_val: float) -> str:
