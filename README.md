@@ -8,7 +8,7 @@ See every token, every cent, in real time. Like an electricity meter for your AI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
-[![Tests: 33 passed](https://img.shields.io/badge/tests-33%20passed-brightgreen)](#development)
+[![Tests: 78 passed](https://img.shields.io/badge/tests-78%20passed-brightgreen)](#development)
 [![Download Windows Installer](https://img.shields.io/badge/Windows-NSIS%20Setup-blueviolet)](https://github.com/zangxin75/token-efficiency/releases/latest)
 
 **English** · [简体中文](README.zh-CN.md)
@@ -71,15 +71,15 @@ tokeneff stats
 ```
 
 ```
-⚡ tokeneff 电表  (CNY)
+⚡ tokeneff meter  (CNY)
 
-  今日花费       ¥0.0284
-  本月累计       ¥0.2524
-  近 7 天日均    ¥0.0361
-  月终预测       ~¥0.93 (100% 置信)
-  累计节省       ¥0.0421
+  Today           ¥0.0284
+  This month      ¥0.2524
+  7-day avg       ¥0.0361
+  Month forecast  ~¥0.93 (100% conf.)
+  Total saved     ¥0.0421
 
-  今日模型花费分布
+  Today's model breakdown
   deepseek-v4-flash  ¥0.0192   15,797 tok
   glm-4-flash        ¥0.0092    8,273 tok
 ```
@@ -91,20 +91,20 @@ tokeneff dashboard
 ```
 
 ```
-╭────────────────────────── ⚡ TokenEff 电表 ──────────────────────────╮
-│   今日 Today        ¥0.0284           ▁                              │
-│   本月 Month        ¥0.2524                                          │
-│   月终预测 Est.     ~¥0.93            100% 置信                      │
+╭────────────────────────── ⚡ TokenEff Meter ────────────────────────╮
+│   Today             ¥0.0284           ▁                            │
+│   This month        ¥0.2524                                          │
+│   Forecast          ~¥0.93            100% conf.                    │
 ╰──────────────────────────────────────────────────────────────────────╯
-╭────────────────────────── 今日模型分布 ──────────────────────────────╮
+╭────────────────────────── Today's Models ───────────────────────────╮
 │  deepseek-v4-flash   ¥0.0192   15,797   ██████████████████          │
 │  glm-4-flash         ¥0.0092    8,273   ████████░░░░░░░░░░          │
 ╰──────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────╮
-│ 💰 vs 官方定价累计节省  ¥0.0421                                      │
+│ 💰 Saved vs official pricing  ¥0.0421                               │
 ╰──────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────╮
-│ ⚡ ¥0.0361/min  ·  更新于 21:41:04                                   │
+│ ⚡ ¥0.0361/min  ·  updated 21:41:04                                  │
 ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -126,17 +126,17 @@ Prefer not to use the CLI? Download the Windows installer — it ships with a
 floating cost widget, system tray, and a setup wizard.
 
 **Download**: Go to [Releases](https://github.com/zangxin75/token-efficiency/releases/latest)
-and grab `tokeneff_0.1.0_x64-setup.exe` (~48 MB). Double-click to install.
+and grab `tokeneff_0.1.1_x64-setup.exe` (~49 MB). Double-click to install.
 
 After installing:
 - **Floating widget**: a small ball in the corner shows today's spend in real time; hover for details.
 - **System tray**: right-click the tray icon to start/stop the meter, open settings, or quit.
 - **Setup wizard**: on first launch it guides you through picking a billing mode (BYOK direct / platform gateway) and configuring your key.
-- **Crash self-healing**: if the meter sidecar dies, it restarts automatically — no manual intervention.
+- **Auto language**: the UI follows your region — English worldwide, Chinese for the CN site.
+- **Start on login**: optional autostart, toggleable in Settings.
+- **Crash self-healing**: if the meter sidecar dies, it restarts automatically — no manual intervention. If its port is taken, it drifts and the app follows.
 
-> ⚠️ The installer does **not** bundle a Python runtime. The meter sidecar requires
-> **Python 3.10+** pre-installed on your machine (on PATH). Developers can build from
-> source — see [Development](#development).
+> ✅ The installer bundles everything including the meter sidecar (PyInstaller-packaged) — no Python installation required.
 
 ---
 
