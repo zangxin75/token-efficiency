@@ -120,3 +120,48 @@ class TestDualStackListen:
 
         resp4 = httpx.get(f"http://127.0.0.1:{port}/health", timeout=5, trust_env=False)
         assert resp4.status_code == 200, "IPv4 路径不可用"
+
+    def test_ipv4_recovers_after_transient_occupation(self, isolated_db):
+        """★ bind 竞态回归：Tauri spawn 链上引导 sidecar 与工作 sidecar 在 ~1s
+        内先后 bind 同端口。引导实例先占 IPv4 后退出，工作实例 bind 撞 10048
+        被永久跳过 → IPv4 监听缺失窗口（Claude Code 走 IPv4 超时）。
+
+        修复后：10048 端口占用应短重试，占位者退出后补绑成功，双栈最终齐备。
+        """
+        import httpx
+
+        from tokeneff.api.local_server import start_proxy_thread
+        from tokeneff.proxy import server as proxy_server
+
+        port = _free_port()
+        # 模拟引导实例：先占住 IPv4，1s 后释放（真实时序窗口 ~100ms，放大到 1s
+        # 避免重试参数调到极限时测试抖动）
+        holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        holder.bind(("127.0.0.1", port))
+        holder.listen(1)
+        import threading
+
+        threading.Timer(1.0, holder.close).start()
+        try:
+            start_proxy_thread(port=port)
+
+            deadline = time.time() + proxy_server.BIND_RETRY_TOTAL_S + 5
+            while time.time() < deadline:
+                try:
+                    r4 = httpx.get(f"http://127.0.0.1:{port}/health", timeout=1, trust_env=False)
+                    r6 = httpx.get(f"http://[::1]:{port}/health", timeout=1, trust_env=False)
+                    if r4.status_code == 200 and r6.status_code == 200:
+                        break
+                except Exception:
+                    time.sleep(0.2)
+            else:
+                pytest.fail("IPv4 未在占位者退出后恢复监听（bind 10048 未重试）")
+
+            r4 = httpx.get(f"http://127.0.0.1:{port}/health", timeout=5, trust_env=False)
+            r6 = httpx.get(f"http://[::1]:{port}/health", timeout=5, trust_env=False)
+            assert r4.status_code == 200 and r6.status_code == 200
+        finally:
+            try:
+                holder.close()
+            except OSError:
+                pass

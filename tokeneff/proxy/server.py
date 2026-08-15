@@ -333,15 +333,52 @@ async def health():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# bind 竞态重试参数：10048 (WSAEADDRINUSE) / EADDRINUSE 通常是同应用族的
+# 引导实例先到先得，~1s 内就会退出释放 —— 短重试窗口足够补上，不会拖慢启动
+BIND_RETRY_INTERVAL_S = 0.2
+BIND_RETRY_TOTAL_S = 3.0
+
+
+def _bind_socket(bind_host: str, port: int) -> "socket.socket":
+    """Bind one listen socket, retrying briefly on address-in-use.
+
+    ★ 竞态修复：Tauri spawn 链上引导 sidecar 与工作 sidecar 在 ~1s 内先后
+    bind 同端口。此前 bind 撞 10048 直接跳过该栈 → IPv4 监听永久缺失，
+    走 IPv4 的客户端超时。端口占用在此窗口内是暂态的，重试到补绑为止；
+    超窗仍失败才放弃（真冲突，如用户手动占了端口）。
+    """
+    import errno
+    import socket
+    import time
+
+    family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+    deadline = time.monotonic() + BIND_RETRY_TOTAL_S
+    last_err: OSError | None = None
+    while True:
+        s = socket.socket(family, socket.SOCK_STREAM)
+        try:
+            s.bind((bind_host, port))
+            s.listen(128)
+            return s
+        except OSError as e:
+            s.close()
+            in_use = e.errno in (errno.EADDRINUSE, errno.EACCES) or getattr(e, "winerror", None) == 10048
+            if not in_use or time.monotonic() >= deadline:
+                raise
+            last_err = e
+            time.sleep(BIND_RETRY_INTERVAL_S)
+
+
 def run(host: str = "127.0.0.1", port: int = 7860):
     """Start the proxy, dual-stack on loopback (IPv4 127.0.0.1 + IPv6 ::1).
 
     ★ 双栈修复：Node.js (Claude Code) 解析 localhost 时优先 IPv6 (::1)。此前
     仅绑 127.0.0.1，::1 连接被拒后客户端回退直连上游，绕过电表（终端能用
-    但计量不动）。两个预绑定 socket 各由一个 uvicorn Server 消费，同端口
-    双 bind 在 Windows/Linux 均可行（IPv4 与 IPv6 是独立地址空间）。
-    显式绑定两个 loopback 字面量而非 "localhost"：交给 DNS 解析会得到单一
-    地址，另一栈仍然不通。
+    但计量不动）。一个 uvicorn Server.serve(sockets=[...]) 消费多个预绑定
+    socket，同端口双 bind 在 Windows/Linux 均可行（IPv4 与 IPv6 是独立地址
+    空间）。显式绑定两个 loopback 字面量而非 "localhost"：交给 DNS 解析会
+    得到单一地址，另一栈仍然不通。bind 失败时按 _bind_socket 的重试策略
+    补绑，超窗才降级单栈。
     """
     import asyncio
     import socket
@@ -351,13 +388,9 @@ def run(host: str = "127.0.0.1", port: int = 7860):
     socks: list[socket.socket] = []
     for bind_host in ("127.0.0.1", "::1"):
         try:
-            family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
-            s = socket.socket(family, socket.SOCK_STREAM)
-            s.bind((bind_host, port))
-            s.listen(128)
-            socks.append(s)
+            socks.append(_bind_socket(bind_host, port))
         except OSError as e:
-            log.warning(f"bind {bind_host}:{port} failed, skipping: {e}")
+            log.warning(f"bind {bind_host}:{port} failed after retries, skipping: {e}")
 
     if not socks:
         raise RuntimeError(f"proxy 无法监听 {port}（IPv4/IPv6 均失败）")
